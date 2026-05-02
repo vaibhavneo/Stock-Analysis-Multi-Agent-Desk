@@ -1,0 +1,36 @@
+# Python caches and local runtime files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and dependency folders
+venv/
+.venv/
+env/
+node_modules/
+
+# Local secrets and machine-specific files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Generated logs/build outputs
+*.log
+dist/
+build/
+coverage/
+
+# Other local prototypes in this workspace, not part of the stock desk repo
+healthai/
+Astrology App/
+web/health.js

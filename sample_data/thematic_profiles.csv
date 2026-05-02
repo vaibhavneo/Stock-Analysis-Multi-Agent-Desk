@@ -1,0 +1,36 @@
+symbol,company,sector,theme
+NVDA,NVIDIA Corp,Semiconductors,AI
+MSFT,Microsoft Corp,Software Infrastructure,AI
+GOOGL,Alphabet Inc,Internet Services,AI
+AMD,Advanced Micro Devices,Semiconductors,AI
+PLTR,Palantir Technologies,Software Infrastructure,AI
+SOUN,SoundHound AI,AI Applications,AI
+AI,C3.ai,Enterprise AI Software,AI
+FFAI,Faraday Future Intelligent Electric,AI Electric Vehicles,AI
+BBAI,BigBear.ai Holdings,Decision Intelligence,AI
+HIMS,Hims & Hers Health,Digital Health,HEALTHCARE
+META,Meta Platforms,Internet Services,AI
+AMZN,Amazon.com,Cloud Platforms,AI
+AVGO,Broadcom,Semiconductors,AI
+TSM,Taiwan Semiconductor Manufacturing,Semiconductors,AI
+ARM,Arm Holdings,Semiconductors,AI
+MU,Micron Technology,Memory Semiconductors,AI
+SMCI,Super Micro Computer,AI Infrastructure,AI
+ORCL,Oracle,Cloud Platforms,AI
+CRM,Salesforce,Enterprise AI Software,AI
+ADBE,Adobe,Creative AI Software,AI
+NOW,ServiceNow,Enterprise AI Software,AI
+SNOW,Snowflake,Data Cloud,AI
+CRWD,CrowdStrike,Cybersecurity AI,AI
+DDOG,Datadog,Observability AI,AI
+MDB,MongoDB,Data Infrastructure,AI
+PATH,UiPath,Automation AI,AI
+UPST,Upstart,AI Lending,AI
+IONQ,IONQ Inc,Quantum Hardware,QUANTUM
+RGTI,Rigetti Computing,Quantum Hardware,QUANTUM
+QBTS,D-Wave Quantum,Quantum Software,QUANTUM
+QUBT,Quantum Computing Inc,Quantum Software,QUANTUM
+ARQQ,Arqit Quantum,Quantum Security,QUANTUM
+IBM,IBM,Quantum Computing Platforms,QUANTUM
+HON,Honeywell,Quantum Computing Platforms,QUANTUM
+LAES,SEALSQ,Post-Quantum Security,QUANTUM

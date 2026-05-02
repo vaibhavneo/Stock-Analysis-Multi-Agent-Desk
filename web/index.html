@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multiagent Stock Desk</title>
+    <link rel="stylesheet" href="styles.css?v=12" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="brand-carousel">
+          <p class="eyebrow">AI + Quantum</p>
+          <h1>Multiagent Stock Desk</h1>
+          <p>Sector, fundamental, technical, recommendation, and options agents for AI and quantum computing names.</p>
+        </div>
+        <form id="analysis-form" class="control-panel">
+          <label>Symbols <input id="symbols" type="text" value="RGTI, PLTR, NVDA" autocomplete="off" /></label>
+          <label>Alpha Vantage API Key <input id="api-key" type="password" placeholder="Optional for Alpha Vantage" autocomplete="off" /></label>
+          <label>Top <input id="top" type="number" min="1" max="80" value="40" /></label>
+          <button class="primary" type="submit">Run Analysis</button>
+        </form>
+      </section>
+
+      <section class="market-strip" aria-label="Market status">
+        <div><span>Universe</span><strong id="universe-count">--</strong></div>
+        <div><span>Mode</span><strong id="mode-label">Sample CSV</strong></div>
+        <div><span>Last Run</span><strong id="last-run">--</strong></div>
+        <div class="feed-toggle">
+          <span>Data Feed</span>
+          <button class="feed-btn" type="button" data-mode="sample">Sample</button>
+          <button class="feed-btn" type="button" data-mode="live">Yahoo/Stooq Live</button>
+          <button class="feed-btn" type="button" data-mode="alpha">Alpha Vantage</button>
+        </div>
+      </section>
+
+      <div id="feed-status" class="status-panel">Loading market feed.</div>
+
+      <section class="scenario-band">
+        <div>
+          <p class="eyebrow">Scenario Runner</p>
+          <h2 id="scenario-title">Custom Basket</h2>
+          <p id="scenario-copy">Run the exact tickers in the symbol box.</p>
+        </div>
+        <div id="scenario-actions" class="scenario-actions">
+          <button type="button" data-scenario="all">All</button>
+          <button type="button" data-scenario="custom">Custom</button>
+          <button type="button" data-scenario="leaders">AI Leaders</button>
+          <button type="button" data-scenario="spec-ai">Spec AI</button>
+          <button type="button" data-scenario="quantum">Quantum</button>
+          <button type="button" data-scenario="risk">Risk</button>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="Run summary">
+        <article><span>Best Stock Action</span><strong id="best-action">--</strong></article>
+        <article><span>Options Bias</span><strong id="options-bias">0 CALL / 0 PUT / 0 WAIT</strong></article>
+        <article><span>Risk Flags</span><strong id="risk-flags">--</strong></article>
+      </section>
+
+      <section class="desk-grid">
+        <article class="panel wide recommendation-panel">
+          <div class="panel-header">
+            <div><p class="eyebrow">Recommendation Agent</p><h2>Stock Picks</h2></div>
+            <span class="subtle" id="stock-count">--</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Symbol</th><th>Theme</th><th>Action</th><th>Score</th><th>Confidence</th><th>Rationale</th><th>Deep</th></tr>
+              </thead>
+              <tbody id="stock-table"><tr><td colspan="7">Run analysis to populate recommendations.</td></tr></tbody>
+            </table>
+          </div>
+          <div id="recommendation-workbench" class="recommendation-workbench">
+            Select a stock recommendation to view trade-desk rationale.
+          </div>
+        </article>
+
+        <article class="panel options-panel">
+          <div class="panel-header">
+            <div><p class="eyebrow">Options Agent</p><h2>Contracts</h2></div>
+          </div>
+          <div id="options-list" class="cards-list">No option recommendations.</div>
+          <div id="option-workbench" class="option-workbench">Select an option recommendation to run scenarios.</div>
+        </article>
+      </section>
+
+      <section class="panel deep-panel">
+        <div class="panel-header">
+          <div><p class="eyebrow">Deep Analysis API</p><h2>Interactive Analysis Desk</h2></div>
+        </div>
+        <div class="analysis-toolbar">
+          <div>
+            <p class="eyebrow">Ticker Selector</p>
+            <div class="stock-selector" id="stock-selector" aria-label="Select a stock">
+              <span>Select a stock to view analysis.</span>
+            </div>
+          </div>
+          <div>
+            <p class="eyebrow">Analysis Tabs</p>
+            <div class="analysis-tabs" id="analysis-tabs" role="tablist" aria-label="Stock analysis sections">
+              <button type="button" role="tab" data-analysis-tab="overview">Overview</button>
+              <button type="button" role="tab" data-analysis-tab="sector">Sector</button>
+              <button type="button" role="tab" data-analysis-tab="fundamental">Fundamental</button>
+              <button type="button" role="tab" data-analysis-tab="technical">Technical</button>
+              <button type="button" role="tab" data-analysis-tab="trade-desk">Trade Desk Summary</button>
+            </div>
+          </div>
+        </div>
+        <div id="deep-analysis" class="deep-content"><div class="empty-state">Select a stock to view analysis.</div></div>
+      </section>
+
+      <section class="background-grid">
+        <article class="panel background-card">
+          <p class="eyebrow">Background Engine</p>
+          <h2>Theme & Industry Leadership</h2>
+          <div id="sector-agent">Run analysis to inspect sector momentum.</div>
+        </article>
+        <article class="panel background-card">
+          <p class="eyebrow">Background Engine</p>
+          <h2>P/E, Sales & Cash Flow</h2>
+          <div id="fundamental-agent">Run analysis to inspect valuation quality.</div>
+        </article>
+        <article class="panel background-card">
+          <p class="eyebrow">Background Engine</p>
+          <h2>Trend, RSI & Volatility</h2>
+          <div id="technical-agent">Run analysis to inspect trend quality.</div>
+        </article>
+      </section>
+    </main>
+
+    <script src="services/stockAnalysisService.js?v=12"></script>
+    <script src="services/optionScenarioService.js?v=12"></script>
+    <script src="app.js?v=12"></script>
+  </body>
+</html>
