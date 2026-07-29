@@ -558,9 +558,12 @@ TOPICS: Dict[str, Topic] = {t.id: t for t in [
 ]}
 
 
-def topic(topic_id: str) -> Optional[Topic]:
-    """Return a Topic by ID, or None if not found."""
-    return TOPICS.get(topic_id)
+def topic(topic_id: str) -> Topic:
+    """Return a Topic by ID, raising KeyError if not found."""
+    try:
+        return TOPICS[topic_id]
+    except KeyError:
+        raise KeyError(f"Unknown topic id: {topic_id!r}. Available: {sorted(TOPICS)}")
 
 
 def topics_at_level(level: str) -> List[Topic]:
@@ -595,21 +598,23 @@ def books_for_topic(topic_id: str) -> List[Book]:
     return [BOOKS[bid] for bid in t.book_refs if bid in BOOKS]
 
 
-def learning_path(topic_id: str) -> List[Topic]:
-    """Return prerequisite-ordered list of topics ending at topic_id (DAG walk, cycle-safe)."""
-    result: List[Topic] = []
+def learning_path(topic_id: str) -> List[str]:
+    """Return prerequisite-ordered list of topic IDs ending at topic_id (DAG walk, cycle-safe)."""
+    result: List[str] = []
     visited: set = set()
+    visiting: set = set()
 
     def _visit(tid: str) -> None:
-        if tid in visited:
+        if tid in visited or tid in visiting:
             return
-        visited.add(tid)
+        visiting.add(tid)
         t = TOPICS.get(tid)
-        if not t:
-            return
-        for prereq in t.prerequisites:
-            _visit(prereq)
-        result.append(t)
+        if t:
+            for prereq in t.prerequisites:
+                _visit(prereq)
+        visiting.discard(tid)
+        visited.add(tid)
+        result.append(tid)
 
     _visit(topic_id)
     return result
