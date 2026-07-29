@@ -10,6 +10,9 @@ from .deep_analysis import build_deep_analysis
 from .data import load_fundamentals, load_symbol_profiles
 from .live_data import fetch_live_quote, load_market_inputs as load_provider_inputs
 from .multiagent import MultiAgentOrchestrator
+from .prediction import price_target as calc_price_target, prediction_for_all
+from .portfolio import load_portfolio, save_portfolio, add_position, remove_position, portfolio_report
+from .report_scheduler import generate_report
 from .symbols import parse_symbol_filter
 
 
@@ -18,6 +21,7 @@ WEB_ROOT = ROOT / "web"
 PRICES_CSV = ROOT / "sample_data" / "thematic_prices.csv"
 PROFILES_CSV = ROOT / "sample_data" / "thematic_profiles.csv"
 FUNDAMENTALS_CSV = ROOT / "sample_data" / "thematic_fundamentals.csv"
+PORTFOLIO_JSON = ROOT / "portfolio.json"
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -147,7 +151,23 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/universe":
             self._send_json(load_universe())
             return
+        if parsed.path == "/api/predict":
+            self._handle_predict(parsed.query)
+            return
+        if parsed.path == "/api/portfolio":
+            self._handle_portfolio_get(parsed.query)
+            return
+        if parsed.path == "/api/report":
+            self._handle_report(parsed.query)
+            return
         self._serve_static(parsed.path)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/portfolio":
+            self._handle_portfolio_post()
+            return
+        self._send_json({"error": "Not found"}, status=404)
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -193,6 +213,88 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         self._send_json(payload)
 
+    def _handle_predict(self, query: str) -> None:
+        params = parse_qs(query)
+        symbol = params.get("symbol", [""])[0].strip().upper()
+        mode = params.get("mode", ["sample"])[0].strip().lower()
+        if not symbol:
+            self._send_json({"error": "symbol is required"}, status=400)
+            return
+        try:
+            resolved = next(iter(parse_symbol_filter(symbol)), symbol)
+            bars, _, fundamentals, _ = load_market_inputs(mode=mode, symbols={resolved})
+            sym_bars = bars.get(resolved)
+            if not sym_bars:
+                self._send_json({"error": f"No data for {resolved}"}, status=404)
+                return
+            from .analysis import analyze_symbol
+            report = analyze_symbol(sym_bars)
+            result = calc_price_target(resolved, sym_bars, fundamentals.get(resolved), report)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+        self._send_json(result)
+
+    def _handle_portfolio_get(self, query: str) -> None:
+        params = parse_qs(query)
+        mode = params.get("mode", ["sample"])[0].strip().lower()
+        try:
+            bars, profiles, fundamentals, _ = load_market_inputs(mode=mode)
+            portfolio = load_portfolio(str(PORTFOLIO_JSON))
+            orch_result = MultiAgentOrchestrator().run(
+                bars_by_symbol=bars,
+                profiles=profiles,
+                fundamentals=fundamentals,
+                top_n=10,
+            )
+            result = portfolio_report(portfolio, bars, profiles, fundamentals, orch_result)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+        self._send_json(result)
+
+    def _handle_portfolio_post(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception as exc:
+            self._send_json({"error": f"Invalid JSON: {exc}"}, status=400)
+            return
+        action = body.get("action", "").lower()
+        symbol = body.get("symbol", "").upper()
+        shares = float(body.get("shares", 0))
+        cost = float(body.get("cost", 0))
+        if not symbol or shares <= 0:
+            self._send_json({"error": "symbol and shares are required"}, status=400)
+            return
+        try:
+            portfolio = load_portfolio(str(PORTFOLIO_JSON))
+            if action == "add":
+                portfolio = add_position(portfolio, symbol, shares, cost)
+            elif action == "remove":
+                portfolio = remove_position(portfolio, symbol, shares)
+            else:
+                self._send_json({"error": "action must be add or remove"}, status=400)
+                return
+            save_portfolio(portfolio, str(PORTFOLIO_JSON))
+            self._send_json({"status": "ok", "positions": len(portfolio.positions)})
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=400)
+
+    def _handle_report(self, query: str) -> None:
+        params = parse_qs(query)
+        period = params.get("period", ["daily"])[0].strip().lower()
+        mode = params.get("mode", ["sample"])[0].strip().lower()
+        if period not in ("daily", "weekly", "monthly"):
+            self._send_json({"error": "period must be daily, weekly, or monthly"}, status=400)
+            return
+        try:
+            result = generate_report(period=period, portfolio_path=str(PORTFOLIO_JSON), mode=mode)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+        self._send_json(result)
+
     def _serve_static(self, path: str) -> None:
         if path == "/":
             target = WEB_ROOT / "index.html"
@@ -225,7 +327,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def _send_cors_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
 

@@ -1443,3 +1443,186 @@ li {
     border-bottom: 0;
   }
 }
+
+/* ── Portfolio & Reports ─────────────────────────────────────── */
+.portfolio-section,
+.reports-section {
+  margin: 1.5rem auto;
+  max-width: var(--max-w);
+}
+
+.portfolio-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.portfolio-summary article {
+  padding: .75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.portfolio-summary article span {
+  font-size: .75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.portfolio-summary article strong {
+  font-size: 1.1rem;
+}
+
+.portfolio-allocation {
+  padding: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.allocation-bar {
+  display: flex;
+  height: 1.5rem;
+  border-radius: .25rem;
+  overflow: hidden;
+  gap: 2px;
+  margin-top: .5rem;
+}
+
+.allocation-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .6rem;
+  font-weight: 700;
+  color: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: flex .4s;
+}
+
+.portfolio-flags {
+  padding: .5rem 1rem;
+}
+
+.flag-badge {
+  display: inline-block;
+  background: var(--bad-bg, rgba(239,68,68,.12));
+  color: var(--bad-fg, #ef4444);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: .2rem .5rem;
+  font-size: .8rem;
+  margin: .2rem;
+}
+
+.portfolio-suggestions {
+  padding: .5rem 1rem .75rem;
+}
+
+.suggestion-card {
+  background: rgba(245,158,11,.08);
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  padding: .5rem .75rem;
+  font-size: .85rem;
+  margin: .25rem 0;
+}
+
+.add-position-form {
+  border-top: 1px solid var(--line);
+  padding: .75rem 1rem;
+}
+
+.add-position-form summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent, #6366f1);
+  font-size: .9rem;
+}
+
+.add-position-form form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-top: .75rem;
+  align-items: flex-end;
+}
+
+.add-position-form label {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.add-position-form input {
+  width: 10rem;
+}
+
+/* Reports */
+.report-btn-row {
+  display: flex;
+  gap: .75rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-output {
+  padding: 1rem;
+}
+
+.report-period-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: .5rem 0 1rem;
+  text-transform: capitalize;
+}
+
+.report-section-title {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  margin: 1rem 0 .5rem;
+  font-weight: 700;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+
+.report-card {
+  background: var(--surface2, rgba(255,255,255,.04));
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  padding: .75rem;
+}
+
+.report-card strong {
+  font-size: 1rem;
+  display: block;
+}
+
+.report-card small {
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.report-download-btn {
+  margin-top: 1rem;
+  font-size: .8rem;
+}
+
+@media (max-width: 600px) {
+  .portfolio-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+  .report-btn-row {
+    flex-direction: column;
+  }
+}

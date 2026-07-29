@@ -1276,3 +1276,256 @@ els.analysisTabs.addEventListener("keydown", (event) => {
 updateModeUI();
 setScenario("custom");
 loadUniverse().then(() => runAnalysis());
+
+// ── Portfolio & Reports ──────────────────────────────────────────────────────
+
+const SECTOR_COLORS = [
+  "#6366f1","#06b6d4","#10b981","#f59e0b","#ef4444","#8b5cf6",
+  "#ec4899","#14b8a6","#f97316","#84cc16","#3b82f6","#a78bfa",
+];
+
+function dollarPnl(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "N/A";
+  const prefix = n >= 0 ? "+" : "";
+  return `${prefix}$${Math.abs(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+}
+
+function pctPnl(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "N/A";
+  const prefix = n >= 0 ? "+" : "";
+  return `${prefix}${n.toFixed(2)}%`;
+}
+
+function renderPortfolio(data) {
+  const tbody = document.querySelector("#portfolio-table");
+  const summary = document.querySelector("#portfolio-summary");
+  if (!data || !data.positions) {
+    tbody.innerHTML = `<tr><td colspan="8">No portfolio data.</td></tr>`;
+    return;
+  }
+
+  // summary bar
+  document.querySelector("#port-total-value").textContent = money(data.total_value);
+  document.querySelector("#port-cash").textContent = money(data.cash);
+  const pnlEl = document.querySelector("#port-total-pnl");
+  pnlEl.textContent = dollarPnl(data.total_pnl);
+  pnlEl.className = data.total_pnl >= 0 ? "up" : "down";
+  const pctEl = document.querySelector("#port-total-pct");
+  pctEl.textContent = pctPnl(data.total_pnl_pct);
+  pctEl.className = data.total_pnl_pct >= 0 ? "up" : "down";
+  summary.style.display = "";
+
+  // holdings table
+  const rows = data.positions.map(p => {
+    const pnlClass = p.unrealized_pnl >= 0 ? "up" : "down";
+    return `<tr>
+      <td><strong>${escapeHtml(p.symbol)}</strong></td>
+      <td>${p.shares}</td>
+      <td>${money(p.avg_cost)}</td>
+      <td>${money(p.current_price)}</td>
+      <td>${money(p.market_value)}</td>
+      <td class="${pnlClass}">${dollarPnl(p.unrealized_pnl)}</td>
+      <td class="${pnlClass}">${pctPnl(p.pnl_pct)}</td>
+      <td>${pill(p.action)}</td>
+    </tr>`;
+  }).join("");
+  tbody.innerHTML = rows || `<tr><td colspan="8">No positions.</td></tr>`;
+
+  // sector allocation bar
+  const alloc = data.sector_allocation || {};
+  const entries = Object.entries(alloc).sort((a, b) => b[1] - a[1]);
+  const allocEl = document.querySelector("#portfolio-allocation");
+  if (entries.length) {
+    const segments = entries.map(([sector, pct], i) => {
+      const color = SECTOR_COLORS[i % SECTOR_COLORS.length];
+      return `<div class="allocation-segment" style="flex:${pct};background:${color}" title="${escapeHtml(sector)}: ${pct}%">${pct > 8 ? escapeHtml(sector.split(" ")[0]) : ""}</div>`;
+    }).join("");
+    allocEl.innerHTML = `<p class="report-section-title">Sector Allocation</p><div class="allocation-bar">${segments}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem">
+        ${entries.map(([s, p], i) => `<span style="font-size:.75rem"><span style="display:inline-block;width:10px;height:10px;background:${SECTOR_COLORS[i % SECTOR_COLORS.length]};border-radius:2px;margin-right:3px"></span>${escapeHtml(s)} ${p}%</span>`).join("")}
+      </div>`;
+  } else {
+    allocEl.innerHTML = "";
+  }
+
+  // risk flags
+  const flagsEl = document.querySelector("#portfolio-flags");
+  const flags = data.risk_flags || [];
+  flagsEl.innerHTML = flags.length
+    ? `<p class="report-section-title">Risk Flags</p>${flags.map(f => `<span class="flag-badge">⚠ ${escapeHtml(f)}</span>`).join("")}`
+    : "";
+
+  // suggestions
+  const suggestEl = document.querySelector("#portfolio-suggestions");
+  const suggs = data.rebalancing_suggestions || [];
+  suggestEl.innerHTML = suggs.length
+    ? `<p class="report-section-title">Rebalancing Suggestions</p>${suggs.map(s => `<div class="suggestion-card">${escapeHtml(s)}</div>`).join("")}`
+    : "";
+}
+
+async function loadPortfolio() {
+  const tbody = document.querySelector("#portfolio-table");
+  tbody.innerHTML = `<tr><td colspan="8">Loading…</td></tr>`;
+  try {
+    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const res = await fetch(`${base}/api/portfolio?mode=${currentMode}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderPortfolio(data);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--bad-fg, red)">${escapeHtml(compactErrorMessage(err))}</td></tr>`;
+  }
+}
+
+async function addPortfolioPosition(symbol, shares, cost) {
+  const statusEl = document.querySelector("#add-pos-status");
+  statusEl.textContent = "Saving…";
+  try {
+    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const res = await fetch(`${base}/api/portfolio`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", symbol, shares: Number(shares), cost: Number(cost) }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    statusEl.textContent = "Saved!";
+    setTimeout(() => { statusEl.textContent = ""; }, 2000);
+    loadPortfolio();
+  } catch (err) {
+    statusEl.textContent = compactErrorMessage(err);
+  }
+}
+
+function renderReport(data) {
+  const out = document.querySelector("#report-output");
+  if (!data || data.error) {
+    out.innerHTML = `<p style="color:var(--bad-fg, red)">${escapeHtml(data?.error || "No data")}</p>`;
+    return;
+  }
+
+  const period = data.period || "report";
+  let html = `<p class="report-period-title">${escapeHtml(period.charAt(0).toUpperCase() + period.slice(1))} Brief — ${escapeHtml(data.generated || "")}</p>`;
+
+  // top buys
+  const topBuys = data.top_buys || [];
+  if (topBuys.length) {
+    html += `<p class="report-section-title">Top Buy Signals</p><div class="report-grid">`;
+    html += topBuys.map(r => `<div class="report-card">${pill(r.action)}<strong>${escapeHtml(r.symbol)}</strong><small>Score: ${r.composite_score?.toFixed(3)}</small></div>`).join("");
+    html += `</div>`;
+  }
+
+  // buy windows
+  const bw = data.buy_windows || [];
+  if (bw.length) {
+    html += `<p class="report-section-title">Buy Windows (RSI oversold + positive momentum)</p><div class="report-grid">`;
+    html += bw.map(r => `<div class="report-card"><strong>${escapeHtml(r.symbol)}</strong><small>RSI ${r.rsi} · ${escapeHtml(r.signal_note || "")}</small></div>`).join("");
+    html += `</div>`;
+  }
+
+  // take profit
+  const tp = data.take_profit_zones || [];
+  if (tp.length) {
+    html += `<p class="report-section-title">Take Profit Zones</p><div class="report-grid">`;
+    html += tp.map(r => `<div class="report-card" style="border-color:#ef4444"><strong>${escapeHtml(r.symbol)}</strong><small>RSI ${r.rsi} · ${escapeHtml(r.signal_note || "")}</small></div>`).join("");
+    html += `</div>`;
+  }
+
+  // reduce signals
+  const reduces = data.reduce_signals || [];
+  if (reduces.length) {
+    html += `<p class="report-section-title">Reduce / Watch List</p><div class="report-grid">`;
+    html += reduces.map(r => `<div class="report-card" style="border-color:#f59e0b"><strong>${escapeHtml(r.symbol)}</strong><small>Score: ${r.composite_score?.toFixed(3)}</small></div>`).join("");
+    html += `</div>`;
+  }
+
+  // portfolio snapshot
+  if (data.portfolio) {
+    const p = data.portfolio;
+    html += `<p class="report-section-title">Portfolio Snapshot</p>
+      <div class="report-grid">
+        <div class="report-card"><span class="subtle">Total Value</span><strong>${money(p.total_value)}</strong></div>
+        <div class="report-card"><span class="subtle">Total P&L</span><strong class="${p.total_pnl >= 0 ? 'up' : 'down'}">${dollarPnl(p.total_pnl)}</strong></div>
+        <div class="report-card"><span class="subtle">Return</span><strong class="${p.total_pnl_pct >= 0 ? 'up' : 'down'}">${pctPnl(p.total_pnl_pct)}</strong></div>
+      </div>`;
+    if (p.risk_flags?.length) {
+      html += `<p class="report-section-title">Risk Flags</p>${p.risk_flags.map(f => `<span class="flag-badge">⚠ ${escapeHtml(f)}</span>`).join("")}`;
+    }
+  }
+
+  // weekly extras
+  if (data.sector_rotation?.length) {
+    html += `<p class="report-section-title">Sector Rotation (Week)</p><div class="report-grid">`;
+    html += data.sector_rotation.map(r => {
+      const cls = r.week_pct >= 0 ? "up" : "down";
+      return `<div class="report-card"><strong class="${cls}">${r.week_pct >= 0 ? "+" : ""}${r.week_pct}%</strong><small>${escapeHtml(r.sector)}</small></div>`;
+    }).join("");
+    html += `</div>`;
+  }
+
+  if (data.best_performers_week?.length) {
+    html += `<p class="report-section-title">Best Performers (Week)</p><div class="report-grid">`;
+    html += data.best_performers_week.map(r => `<div class="report-card"><strong>${escapeHtml(r.symbol)}</strong><small class="up">+${r.week_pct}%</small></div>`).join("");
+    html += `</div>`;
+  }
+
+  // monthly extras
+  if (data.suggested_allocation?.length) {
+    html += `<p class="report-section-title">Suggested Allocation (Top 10)</p><div class="report-grid">`;
+    html += data.suggested_allocation.map(r =>
+      `<div class="report-card">${pill(r.action)}<strong>${escapeHtml(r.symbol)}</strong><small>${r.composite_score?.toFixed(3)} · ${r.target_weight_pct}%</small></div>`
+    ).join("");
+    html += `</div>`;
+  }
+
+  if (data.price_target_progress?.length) {
+    html += `<p class="report-section-title">3-Month Price Targets (Top Upside)</p><div class="report-grid">`;
+    html += data.price_target_progress.slice(0, 10).map(r =>
+      `<div class="report-card"><strong>${escapeHtml(r.symbol)}</strong><small>Now ${money(r.last_price)} → Target ${money(r["3_month_target"])} <span class="up">+${r.upside_pct}%</span></small></div>`
+    ).join("");
+    html += `</div>`;
+  }
+
+  // download button
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  html += `<a href="${url}" download="${period}-report-${data.generated || 'report'}.json" class="primary report-download-btn">Download JSON</a>`;
+
+  out.innerHTML = html;
+}
+
+async function loadReport(period) {
+  const out = document.querySelector("#report-output");
+  out.innerHTML = `<p class="subtle">Generating ${period} report…</p>`;
+  try {
+    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const res = await fetch(`${base}/api/report?period=${period}&mode=${currentMode}`);
+    const data = await res.json();
+    renderReport(data);
+  } catch (err) {
+    out.innerHTML = `<p style="color:var(--bad-fg, red)">${escapeHtml(compactErrorMessage(err))}</p>`;
+  }
+}
+
+// wire up portfolio
+document.querySelector("#portfolio-refresh-btn")?.addEventListener("click", loadPortfolio);
+
+document.querySelector("#add-position-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const symbol = document.querySelector("#pos-symbol")?.value?.trim().toUpperCase();
+  const shares = document.querySelector("#pos-shares")?.value;
+  const cost = document.querySelector("#pos-cost")?.value;
+  if (!symbol || !shares || !cost) return;
+  addPortfolioPosition(symbol, shares, cost);
+});
+
+// wire up reports
+document.querySelectorAll("[data-report-period]").forEach(btn => {
+  btn.addEventListener("click", () => loadReport(btn.dataset.reportPeriod));
+});
+
+// auto-load portfolio on page ready
+loadPortfolio();

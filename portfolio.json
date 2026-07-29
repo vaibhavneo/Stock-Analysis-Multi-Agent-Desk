@@ -1,0 +1,23 @@
+{
+  "positions": [
+    {
+      "symbol": "NVDA",
+      "shares": 10.0,
+      "avg_cost": 850.0,
+      "date_added": "2025-01-15"
+    },
+    {
+      "symbol": "MSFT",
+      "shares": 20.0,
+      "avg_cost": 390.0,
+      "date_added": "2025-02-01"
+    },
+    {
+      "symbol": "AMZN",
+      "shares": 15.0,
+      "avg_cost": 185.0,
+      "date_added": "2025-03-10"
+    }
+  ],
+  "cash": 5000.0
+}

@@ -128,6 +128,54 @@
           <div id="technical-agent">Run analysis to inspect trend quality.</div>
         </article>
       </section>
+
+      <!-- ── Portfolio Tracker ───────────────────────────────── -->
+      <section class="panel portfolio-section">
+        <div class="panel-header">
+          <div><p class="eyebrow">My Portfolio</p><h2>Holdings &amp; P&amp;L</h2></div>
+          <button type="button" class="primary" id="portfolio-refresh-btn">Refresh</button>
+        </div>
+        <div id="portfolio-summary" class="portfolio-summary" style="display:none">
+          <article><span>Total Value</span><strong id="port-total-value">--</strong></article>
+          <article><span>Total P&amp;L</span><strong id="port-total-pnl">--</strong></article>
+          <article><span>Return</span><strong id="port-total-pct">--</strong></article>
+          <article><span>Cash</span><strong id="port-cash">--</strong></article>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Symbol</th><th>Shares</th><th>Avg Cost</th><th>Current</th><th>Value</th><th>P&amp;L</th><th>Return</th><th>Action</th></tr>
+            </thead>
+            <tbody id="portfolio-table"><tr><td colspan="8">Loading portfolio…</td></tr></tbody>
+          </table>
+        </div>
+        <div id="portfolio-allocation" class="portfolio-allocation"></div>
+        <div id="portfolio-flags" class="portfolio-flags"></div>
+        <div id="portfolio-suggestions" class="portfolio-suggestions"></div>
+        <details class="add-position-form">
+          <summary>+ Add Position</summary>
+          <form id="add-position-form">
+            <label>Symbol <input type="text" id="pos-symbol" placeholder="NVDA" /></label>
+            <label>Shares <input type="number" id="pos-shares" placeholder="10" min="0.01" step="0.01" /></label>
+            <label>Cost / Share <input type="number" id="pos-cost" placeholder="850.00" min="0" step="0.01" /></label>
+            <button type="submit" class="primary">Add</button>
+            <span id="add-pos-status" class="subtle"></span>
+          </form>
+        </details>
+      </section>
+
+      <!-- ── Scheduled Reports ─────────────────────────────────── -->
+      <section class="panel reports-section">
+        <div class="panel-header">
+          <div><p class="eyebrow">Scheduled Reports</p><h2>Daily · Weekly · Monthly Briefings</h2></div>
+        </div>
+        <div class="report-btn-row">
+          <button type="button" class="primary" data-report-period="daily">Daily Brief</button>
+          <button type="button" data-report-period="weekly">Weekly Review</button>
+          <button type="button" data-report-period="monthly">Monthly Strategy</button>
+        </div>
+        <div id="report-output" class="report-output"><p class="subtle">Select a report period above.</p></div>
+      </section>
     </main>
 
     <script src="services/stockAnalysisService.js?v=12"></script>
