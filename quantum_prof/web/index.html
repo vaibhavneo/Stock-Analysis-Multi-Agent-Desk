@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quantum Professor</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="if(window._katexReady)window._katexReady()"></script>
+</head>
+<body>
+<div id="app">
+  <!-- Sidebar navigation -->
+  <nav id="sidebar">
+    <div class="sidebar-header">
+      <h1>⚛ Quantum Professor</h1>
+      <p>Feynman-style QM desk</p>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Curriculum</div>
+      <div class="nav-item active" data-section="topics">Topics</div>
+      <div class="nav-item" data-section="path">Learning Path</div>
+      <div class="nav-item" data-section="books">Books</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Tools</div>
+      <div class="nav-item" data-section="solver">Physics Solver</div>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main id="main">
+
+    <!-- Topics browser -->
+    <section id="section-topics" class="section active">
+      <h2>Topics</h2>
+      <div class="form-row" style="margin-bottom:16px">
+        <div class="form-group">
+          <label>Filter by level</label>
+          <select id="topic-level-filter">
+            <option value="">All levels</option>
+            <option value="basics">Basics</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+            <option value="advanced_topics">Advanced Topics</option>
+          </select>
+        </div>
+      </div>
+      <div id="topics-list"></div>
+    </section>
+
+    <!-- Topic detail (dynamic) -->
+    <section id="section-topic-detail" class="section">
+      <div id="topic-detail-content"></div>
+    </section>
+
+    <!-- Learning path -->
+    <section id="section-path" class="section">
+      <h2>Learning Path</h2>
+      <p style="color:var(--muted);margin-bottom:16px">Enter a topic ID to compute the prerequisite chain.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Target topic</label>
+          <input type="text" id="path-topic-input" list="topics-datalist" placeholder="e.g. hydrogen-atom" style="width:260px">
+          <datalist id="topics-datalist"></datalist>
+        </div>
+        <button id="path-go-btn">Compute Path</button>
+      </div>
+      <div id="path-content"></div>
+    </section>
+
+    <!-- Books -->
+    <section id="section-books" class="section">
+      <h2>Recommended Books</h2>
+      <div class="form-row" style="margin-bottom:16px">
+        <div class="form-group">
+          <label>Filter by level</label>
+          <select id="book-level-filter">
+            <option value="">All levels</option>
+            <option value="basics">Basics</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+            <option value="advanced_topics">Advanced Topics</option>
+          </select>
+        </div>
+      </div>
+      <div id="books-list"></div>
+    </section>
+
+    <!-- Physics solver -->
+    <section id="section-solver" class="section">
+      <h2>Physics Solver</h2>
+      <p style="color:var(--muted);margin-bottom:16px">Compute exact quantum mechanical results.</p>
+      <div class="form-row" style="align-items:flex-end">
+        <div class="form-group">
+          <label>Topic / System</label>
+          <select id="solver-topic" style="width:220px">
+            <option value="particle-in-a-box">Particle in a Box</option>
+            <option value="harmonic-oscillator">Quantum Harmonic Oscillator</option>
+            <option value="hydrogen-atom">Hydrogen Atom (energy levels)</option>
+            <option value="hydrogen-transition">Hydrogen Transition</option>
+            <option value="de-broglie">de Broglie Wavelength</option>
+            <option value="photon-energy">Photon Energy</option>
+            <option value="uncertainty-principle">Uncertainty Principle</option>
+            <option value="quantum-information">Qubit / Gate</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="solver-params" class="form-row" style="margin-top:8px"></div>
+
+      <button id="solver-run-btn" style="margin-top:4px">Calculate</button>
+
+      <div id="solver-result" style="margin-top:16px"></div>
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

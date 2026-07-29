@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quantum Professor — Offline</title>
+<style>
+:root{--bg:#f8f9fa;--surface:#fff;--border:#dee2e6;--text:#212529;--muted:#6c757d;--primary:#0d6efd;--accent:#6f42c1;--code-bg:#f1f3f5;--r:8px}
+@media(prefers-color-scheme:dark){:root{--bg:#1a1b1e;--surface:#25262b;--border:#373a40;--text:#c1c2c5;--muted:#909296;--primary:#4dabf7;--accent:#cc5de8;--code-bg:#2c2e33}}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;font-size:15px}
+h1{font-size:1.5rem;color:var(--accent);margin-bottom:4px}
+h2{font-size:1.15rem;margin:20px 0 10px;border-bottom:1px solid var(--border);padding-bottom:6px}
+h3{font-size:1rem;margin:14px 0 6px;color:var(--accent)}
+a{color:var(--primary)}
+.container{max-width:880px;margin:0 auto;padding:24px}
+.header{margin-bottom:24px;padding:20px;background:var(--surface);border-radius:var(--r);border:1px solid var(--border)}
+.header p{color:var(--muted);font-size:0.88rem;margin-top:4px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px}
+.tab{padding:8px 16px;border-radius:var(--r);cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:0.88rem}
+.tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.card-title{font-weight:600;font-size:0.95rem}
+.card-meta{font-size:0.78rem;color:var(--muted);margin-top:2px}
+.card-body{margin-top:8px;font-size:0.87rem}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:0.72rem;font-weight:600}
+.badge-basics{background:#d3f9d8;color:#2b8a3e}
+.badge-intermediate{background:#d0ebff;color:#1971c2}
+.badge-advanced{background:#ffe8cc;color:#e67700}
+.badge-advanced_topics{background:#f3d9fa;color:#862e9c}
+@media(prefers-color-scheme:dark){
+  .badge-basics{background:#1b4332;color:#74c69d}
+  .badge-intermediate{background:#0f3460;color:#74c0fc}
+  .badge-advanced{background:#4a2800;color:#ffa94d}
+  .badge-advanced_topics{background:#2f0047;color:#da77f2}
+}
+select,input{padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);font-size:0.88rem;outline:none}
+button{padding:8px 14px;border:none;border-radius:var(--r);background:var(--primary);color:#fff;font-size:0.88rem;cursor:pointer}
+.result{background:var(--code-bg);border:1px solid var(--border);border-radius:var(--r);padding:12px;font-family:monospace;font-size:0.82rem;margin-top:10px;white-space:pre-wrap}
+.path-step{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);align-items:flex-start}
+.path-step:last-child{border-bottom:none}
+.step-num{width:24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;font-size:0.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.detail-back{margin-bottom:16px;cursor:pointer;color:var(--primary);font-size:0.88rem}
+.eq{padding:6px 10px;background:var(--code-bg);border-radius:var(--r);margin:3px 0;font-family:monospace;font-size:0.85rem}
+.hint{font-size:0.82rem;color:var(--muted);margin-top:6px}
+.answer{display:none;margin-top:8px;padding:8px;background:var(--code-bg);border-radius:var(--r);font-size:0.83rem;font-family:monospace}
+.answer.vis{display:block}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+  <h1>⚛ Quantum Professor <small style="font-size:0.6em;color:var(--muted)">(offline)</small></h1>
+  <p>Feynman-style quantum mechanics desk — no internet required after first load</p>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="showPanel('topics')">Topics</div>
+  <div class="tab" onclick="showPanel('path')">Learning Path</div>
+  <div class="tab" onclick="showPanel('books')">Books</div>
+  <div class="tab" onclick="showPanel('solver')">Calculator</div>
+</div>
+
+<!-- Topics panel -->
+<div id="panel-topics" class="panel active">
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <select id="level-filter" onchange="filterTopics(this.value)">
+      <option value="">All levels</option>
+      <option value="basics">Basics</option>
+      <option value="intermediate">Intermediate</option>
+      <option value="advanced">Advanced</option>
+      <option value="advanced_topics">Advanced Topics</option>
+    </select>
+  </div>
+  <div id="topics-list"></div>
+</div>
+
+<!-- Topic detail (hidden by default) -->
+<div id="panel-topic-detail" class="panel">
+  <div class="detail-back" onclick="showPanel('topics')">← Back to Topics</div>
+  <div id="topic-detail"></div>
+</div>
+
+<!-- Path panel -->
+<div id="panel-path" class="panel">
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <select id="path-target" style="width:260px">
+      <option value="">Select a target topic…</option>
+    </select>
+    <button onclick="showPath()">Compute Path</button>
+  </div>
+  <div id="path-result"></div>
+</div>
+
+<!-- Books panel -->
+<div id="panel-books" class="panel">
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <select id="book-filter" onchange="filterBooks(this.value)">
+      <option value="">All levels</option>
+      <option value="basics">Basics</option>
+      <option value="intermediate">Intermediate</option>
+      <option value="advanced">Advanced</option>
+      <option value="advanced_topics">Advanced Topics</option>
+    </select>
+  </div>
+  <div id="books-list"></div>
+</div>
+
+<!-- Solver panel -->
+<div id="panel-solver" class="panel">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <div>
+      <label style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:3px">System</label>
+      <select id="calc-system" onchange="updateCalcForm()" style="width:220px">
+        <option value="well">Particle in a Box</option>
+        <option value="qho">Harmonic Oscillator</option>
+        <option value="hydrogen">Hydrogen Level</option>
+        <option value="transition">Hydrogen Transition</option>
+        <option value="debroglie">de Broglie Wavelength</option>
+        <option value="photon">Photon Energy</option>
+        <option value="uncertainty">Uncertainty Principle</option>
+      </select>
+    </div>
+  </div>
+  <div id="calc-params" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+  <button onclick="runCalc()">Calculate</button>
+  <div id="calc-result"></div>
+</div>
+
+</div><!-- /container -->
+
+<script>
+// ── Embedded data ──────────────────────────────────────────────────────────
+const TOPICS = [
+  {id:"wave-particle-duality",title:"Wave-Particle Duality",level:"basics",prerequisites:[],intuition:"Quantum objects are neither waves nor particles — they're something new that shows wave-like or particle-like behavior depending on how you look at them.",key_concepts:["wave-particle duality","complementarity","double-slit experiment"],key_equations:["\\lambda = h/p","E = hf"],books:["feynman-vol3","griffiths"]},
+  {id:"photoelectric-effect",title:"Photoelectric Effect",level:"basics",prerequisites:[],intuition:"Light comes in discrete packets (photons). Only photons with enough energy can eject electrons — it's all-or-nothing, not about intensity.",key_concepts:["photon","work function","threshold frequency"],key_equations:["E = hf","KE_{max} = hf - \\phi"],books:["feynman-vol3","griffiths"]},
+  {id:"de-broglie",title:"de Broglie Hypothesis",level:"basics",prerequisites:["wave-particle-duality"],intuition:"If light (a wave) can behave like a particle, maybe electrons (particles) have a wavelength. de Broglie proposed λ = h/p — and it was confirmed by electron diffraction!",key_concepts:["matter waves","de Broglie wavelength","electron diffraction"],key_equations:["\\lambda = h/p = h/(mv)"],books:["griffiths","feynman-vol3"]},
+  {id:"double-slit",title:"Double-Slit Experiment",level:"basics",prerequisites:["wave-particle-duality"],intuition:"When no one looks, electrons interfere like waves. When you measure which slit — the pattern vanishes. Observation itself disturbs the quantum state.",key_concepts:["interference","which-path information","measurement"],key_equations:["d\\sin\\theta = m\\lambda"],books:["feynman-vol3"]},
+  {id:"blackbody-radiation",title:"Blackbody Radiation",level:"basics",prerequisites:[],intuition:"Classical physics predicted infinite energy at high frequencies (ultraviolet catastrophe). Planck fixed it by quantizing energy: E = nhf.",key_concepts:["Planck hypothesis","ultraviolet catastrophe","Wien's law"],key_equations:["E = nhf","\\lambda_{max}T = 2.898\\times10^{-3}\\text{ m·K}"],books:["griffiths","feynman-vol3"]},
+  {id:"bohr-model",title:"Bohr Model of Hydrogen",level:"basics",prerequisites:["blackbody-radiation"],intuition:"Electrons orbit in fixed allowed radii. Jumping between orbits emits or absorbs light. Wrong picture, right energy levels.",key_concepts:["quantized orbits","energy levels","Rydberg formula"],key_equations:["E_n = -13.6/n^2\\text{ eV}","r_n = n^2 a_0"],books:["griffiths","townsend"]},
+  {id:"uncertainty-principle",title:"Uncertainty Principle",level:"basics",prerequisites:["wave-particle-duality"],intuition:"Position and momentum can't both be sharp at once — it's not about measurement error, it's a fundamental property of waves. The more localized a wave, the more spread in frequency.",key_concepts:["Heisenberg uncertainty","complementary variables","wave packets"],key_equations:["\\Delta x\\,\\Delta p \\geq \\hbar/2","\\Delta E\\,\\Delta t \\geq \\hbar/2"],books:["griffiths","feynman-vol3"]},
+  {id:"wavefunction-born-rule",title:"Wavefunction & Born Rule",level:"basics",prerequisites:["uncertainty-principle"],intuition:"The wavefunction ψ carries all quantum information. |ψ|² is the probability density — not the particle itself, but the probability of finding it.",key_concepts:["wavefunction","Born rule","normalization","probability density"],key_equations:["|\\psi(x)|^2 dx = \\text{probability in }dx","\\int|\\psi|^2 dx = 1"],books:["griffiths","shankar"]},
+  {id:"schrodinger-equation",title:"Schrödinger Equation",level:"basics",prerequisites:["wavefunction-born-rule"],intuition:"This is the quantum equation of motion — it tells you how ψ evolves. Stationary states have definite energy; time dependence is e^{-iEt/ℏ}.",key_concepts:["time-dependent TDSE","time-independent TISE","stationary states","energy eigenstates"],key_equations:["i\\hbar\\partial_t\\psi = \\hat{H}\\psi","-\\frac{\\hbar^2}{2m}\\psi'' + V\\psi = E\\psi"],books:["griffiths","shankar"]},
+  {id:"particle-in-a-box",title:"Particle in a Box",level:"basics",prerequisites:["schrodinger-equation"],intuition:"Confine a particle and it can only have discrete energies — quantization emerges directly from boundary conditions. E_n ∝ n². The ground state has zero-point energy.",key_concepts:["infinite square well","quantization","zero-point energy","nodes"],key_equations:["E_n = \\frac{n^2\\pi^2\\hbar^2}{2mL^2}","\\psi_n = \\sqrt{2/L}\\sin(n\\pi x/L)"],books:["griffiths","feynman-vol3"]},
+  {id:"step-barrier-tunneling",title:"Tunnelling",level:"intermediate",prerequisites:["particle-in-a-box"],intuition:"A particle can tunnel through a classically forbidden barrier because its wavefunction decays exponentially (doesn't hit zero) inside the barrier.",key_concepts:["tunnelling","evanescent wave","transmission coefficient"],key_equations:["T \\approx e^{-2\\kappa L}","\\kappa = \\sqrt{2m(V_0-E)}/\\hbar"],books:["griffiths","shankar"]},
+  {id:"harmonic-oscillator",title:"Quantum Harmonic Oscillator",level:"intermediate",prerequisites:["schrodinger-equation"],intuition:"The QHO is the workhorse of QM — every smooth potential looks like a parabola near its minimum. Ladder operators a± make it algebraically elegant.",key_concepts:["ladder operators","zero-point energy","Hermite polynomials"],key_equations:["E_n = \\hbar\\omega(n+\\tfrac{1}{2})","\\hat{H} = \\hbar\\omega(a^+a^- + \\tfrac{1}{2})"],books:["griffiths","shankar","sakurai"]},
+  {id:"hydrogen-atom",title:"Hydrogen Atom",level:"intermediate",prerequisites:["schrodinger-equation","bohr-model"],intuition:"Solving the 3D Schrödinger equation in spherical coordinates gives the famous hydrogen wavefunctions — characterized by n, l, m quantum numbers.",key_concepts:["spherical harmonics","radial wavefunctions","quantum numbers n,l,m"],key_equations:["E_n = -13.6/n^2\\text{ eV}","\\psi_{nlm}(r,\\theta,\\phi) = R_{nl}(r)Y_l^m(\\theta,\\phi)"],books:["griffiths","shankar","cohen-tannoudji"]},
+  {id:"operators-observables",title:"Operators & Observables",level:"intermediate",prerequisites:["wavefunction-born-rule"],intuition:"Every measurable quantity has a corresponding Hermitian operator. Measurement gives an eigenvalue; afterwards the state collapses to the eigenstate.",key_concepts:["Hermitian operators","eigenvalues","expectation values","measurement postulate"],key_equations:["\\langle A\\rangle = \\langle\\psi|\\hat{A}|\\psi\\rangle","\\hat{p} = -i\\hbar\\partial_x"],books:["griffiths","shankar"]},
+  {id:"spin-pauli",title:"Spin & Pauli Matrices",level:"advanced",prerequisites:["operators-observables"],intuition:"Spin is intrinsic angular momentum with no classical analogue. Spin-1/2 particles have two states |↑⟩ and |↓⟩. Pauli matrices σ_x, σ_y, σ_z generate rotations.",key_concepts:["spin-1/2","Pauli matrices","spinors","Stern-Gerlach"],key_equations:["\\sigma_x = \\begin{pmatrix}0&1\\\\1&0\\end{pmatrix}","S = \\hbar\\sigma/2"],books:["griffiths","sakurai","shankar"]},
+  {id:"quantum-information",title:"Quantum Information",level:"advanced_topics",prerequisites:["spin-pauli"],intuition:"Quantum computing exploits superposition and entanglement. A qubit can be |0⟩, |1⟩, or any α|0⟩+β|1⟩. Gates are unitary matrices.",key_concepts:["qubit","superposition","entanglement","quantum gates"],key_equations:["|\\psi\\rangle = \\alpha|0\\rangle + \\beta|1\\rangle","H = \\frac{1}{\\sqrt{2}}\\begin{pmatrix}1&1\\\\1&-1\\end{pmatrix}"],books:["nielsen-chuang"]},
+];
+
+const BOOKS = [
+  {id:"feynman-vol3",title:"The Feynman Lectures on Physics, Vol. III",authors:["Feynman","Leighton","Sands"],level:"basics",why_read:"Feynman's own voice — unmatched physical intuition and no-nonsense explanations. Free online."},
+  {id:"griffiths",title:"Introduction to Quantum Mechanics",authors:["Griffiths","Schroeter"],level:"basics",why_read:"The most widely used undergraduate QM textbook. Clear, readable, excellent problems."},
+  {id:"shankar",title:"Principles of Quantum Mechanics",authors:["Shankar"],level:"intermediate",why_read:"Mathematically rigorous with superb exposition. Covers linear algebra needed for QM before diving in."},
+  {id:"sakurai",title:"Modern Quantum Mechanics",authors:["Sakurai","Napolitano"],level:"advanced",why_read:"Starts with spin and Dirac notation — a refreshing approach for those who want the modern formalism first."},
+  {id:"nielsen-chuang",title:"Quantum Computation and Quantum Information",authors:["Nielsen","Chuang"],level:"advanced_topics",why_read:"The definitive reference for quantum computing and information theory."},
+  {id:"cohen-tannoudji",title:"Quantum Mechanics (2 vols)",authors:["Cohen-Tannoudji","Diu","Laloë"],level:"intermediate",why_read:"Encyclopedic and thorough — excellent as a reference with solved complements after each chapter."},
+  {id:"townsend",title:"A Modern Approach to Quantum Mechanics",authors:["Townsend"],level:"basics",why_read:"Like Sakurai but at undergraduate level — begins with spin rather than waves."},
+];
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  const tabs = document.querySelectorAll('.tab');
+  const map = {topics:0, path:1, books:2, solver:3};
+  if (map[name] !== undefined) tabs[map[name]].classList.add('active');
+}
+
+// ── Topics ─────────────────────────────────────────────────────────────────
+function filterTopics(level) {
+  const filtered = level ? TOPICS.filter(t => t.level === level) : TOPICS;
+  renderTopics(filtered);
+}
+
+function renderTopics(topics) {
+  document.getElementById('topics-list').innerHTML = topics.map(t => `
+    <div class="card" style="cursor:pointer" onclick="showTopicDetail('${t.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="card-title">${t.title}</span>
+        <span class="badge badge-${t.level}">${t.level}</span>
+      </div>
+      <div class="card-meta">${t.prerequisites.length ? 'Prereqs: ' + t.prerequisites.join(', ') : 'No prerequisites'}</div>
+      <div class="card-body">${t.intuition.slice(0,100)}…</div>
+    </div>
+  `).join('');
+}
+
+function showTopicDetail(id) {
+  const t = TOPICS.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('topic-detail').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="border:none;margin:0">${t.title}</h2>
+      <span class="badge badge-${t.level}">${t.level}</span>
+    </div>
+    ${t.prerequisites.length ? `<p><strong>Prerequisites:</strong> ${t.prerequisites.map(p => `<a href="#" onclick="showTopicDetail('${p}');return false">${p}</a>`).join(', ')}</p>` : ''}
+    <h3>Intuition</h3><p>${t.intuition}</p>
+    <h3>Key Concepts</h3><ul>${t.key_concepts.map(c => `<li>${c}</li>`).join('')}</ul>
+    <h3>Key Equations</h3>${t.key_equations.map(eq => `<div class="eq">${eq}</div>`).join('')}
+    <h3>Recommended Books</h3><p>${t.books.join(', ')}</p>
+    <div style="margin-top:16px">
+      <button onclick="showPanel('topics')" style="background:var(--surface);color:var(--text);border:1px solid var(--border)">← Back</button>
+      <button onclick="computePathTo('${t.id}')" style="margin-left:8px">Learning Path</button>
+    </div>
+  `;
+  showPanel('topic-detail');
+}
+
+// ── Path ───────────────────────────────────────────────────────────────────
+function populatePathSelect() {
+  const sel = document.getElementById('path-target');
+  TOPICS.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.id; opt.textContent = t.title;
+    sel.appendChild(opt);
+  });
+}
+
+function computePathTo(targetId) {
+  document.getElementById('path-target').value = targetId;
+  showPanel('path');
+  showPath();
+}
+
+function showPath() {
+  const targetId = document.getElementById('path-target').value;
+  if (!targetId) { document.getElementById('path-result').innerHTML = '<p style="color:var(--muted)">Select a topic above.</p>'; return; }
+  const path = computeLearningPath(targetId);
+  document.getElementById('path-result').innerHTML = `
+    <p style="color:var(--muted);margin-bottom:12px">${path.length} steps</p>
+    ${path.map((id, i) => {
+      const t = TOPICS.find(x => x.id === id);
+      if (!t) return '';
+      return `<div class="path-step">
+        <div class="step-num">${i+1}</div>
+        <div>
+          <div style="font-weight:600;cursor:pointer" onclick="showTopicDetail('${t.id}')">${t.title}</div>
+          <div style="font-size:0.78rem;color:var(--muted)">${t.level}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function computeLearningPath(topicId) {
+  const visited = new Set(), visiting = new Set(), path = [];
+  function visit(id) {
+    if (visited.has(id) || visiting.has(id)) return;
+    visiting.add(id);
+    const t = TOPICS.find(x => x.id === id);
+    if (t) t.prerequisites.forEach(visit);
+    visiting.delete(id);
+    visited.add(id);
+    path.push(id);
+  }
+  visit(topicId);
+  return path;
+}
+
+// ── Books ──────────────────────────────────────────────────────────────────
+function filterBooks(level) {
+  const filtered = level ? BOOKS.filter(b => b.level === level) : BOOKS;
+  renderBooks(filtered);
+}
+
+function renderBooks(books) {
+  document.getElementById('books-list').innerHTML = books.map(b => `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <span class="card-title">${b.title}</span>
+        <span class="badge badge-${b.level}" style="margin-left:8px;flex-shrink:0">${b.level}</span>
+      </div>
+      <div class="card-meta">${b.authors.join(', ')}</div>
+      <div class="card-body">${b.why_read}</div>
+    </div>
+  `).join('');
+}
+
+// ── Calculator ─────────────────────────────────────────────────────────────
+const HBAR = 1.0545718176461565e-34, H = 6.62607015e-34, C = 299792458,
+      ME = 9.1093837015e-31, EV = 1.602176634e-19, RYD = 13.605693122994;
+
+const CALC_FORMS = {
+  well: [{id:'n',label:'n (quantum number)',val:'1'},{id:'L',label:'L (well width, m)',val:'1e-9'}],
+  qho:  [{id:'n',label:'n',val:'0'},{id:'omega',label:'ω (rad/s)',val:'1e14'}],
+  hydrogen: [{id:'n',label:'n',val:'1'}],
+  transition: [{id:'ni',label:'n_i (initial)',val:'3'},{id:'nf',label:'n_f (final)',val:'2'}],
+  debroglie: [{id:'m',label:'mass (kg)',val:'9.109e-31'},{id:'v',label:'speed (m/s)',val:'1e6'}],
+  photon: [{id:'wl',label:'wavelength (nm)',val:'500'}],
+  uncertainty: [{id:'dx',label:'Δx (m)',val:'1e-10'}],
+};
+
+function updateCalcForm() {
+  const sys = document.getElementById('calc-system').value;
+  const fields = CALC_FORMS[sys] || [];
+  document.getElementById('calc-params').innerHTML = fields.map(f => `
+    <div>
+      <label style="display:block;font-size:0.78rem;color:var(--muted);margin-bottom:3px">${f.label}</label>
+      <input id="cf-${f.id}" value="${f.val}" style="width:150px">
+    </div>
+  `).join('');
+}
+
+function gv(id) { return parseFloat(document.getElementById('cf-'+id)?.value || 0); }
+
+function runCalc() {
+  const sys = document.getElementById('calc-system').value;
+  let result = {};
+  try {
+    if (sys==='well') {
+      const n=gv('n'), L=gv('L'), E=Math.pow(n*Math.PI*HBAR,2)/(2*ME*L*L);
+      result={n,L_nm:L*1e9,energy_eV:+(E/EV).toFixed(6),formula:"E_n = n²π²ℏ²/(2mL²)"};
+    } else if (sys==='qho') {
+      const n=gv('n'), omega=gv('omega'), E=HBAR*omega*(n+0.5);
+      result={n,omega,energy_J:E,energy_eV:+(E/EV).toFixed(6),formula:"E_n = ℏω(n+½)"};
+    } else if (sys==='hydrogen') {
+      const n=gv('n'), E=-RYD/(n*n);
+      result={n,energy_eV:+E.toFixed(6),formula:"E_n = -13.606/n² eV"};
+    } else if (sys==='transition') {
+      const ni=gv('ni'), nf=gv('nf'), dE=Math.abs(-RYD/(nf*nf)+RYD/(ni*ni));
+      const wl=H*C/(dE*EV)*1e9;
+      result={n_i:ni,n_f:nf,delta_eV:+dE.toFixed(4),wavelength_nm:+wl.toFixed(2)};
+    } else if (sys==='debroglie') {
+      const m=gv('m'), v=gv('v'), wl=H/(m*v);
+      result={mass_kg:m,speed_m_s:v,wavelength_m:wl,wavelength_pm:+(wl*1e12).toFixed(4),formula:"λ = h/(mv)"};
+    } else if (sys==='photon') {
+      const wl=gv('wl'), E=H*C/(wl*1e-9*EV);
+      result={wavelength_nm:wl,energy_eV:+E.toFixed(4),formula:"E = hc/λ"};
+    } else if (sys==='uncertainty') {
+      const dx=gv('dx'), dp=HBAR/(2*dx);
+      result={delta_x_m:dx,min_delta_p_kgms:dp,formula:"Δx·Δp ≥ ℏ/2"};
+    }
+  } catch(e) { result={error:e.message}; }
+  document.getElementById('calc-result').innerHTML = `<div class="result">${JSON.stringify(result,null,2)}</div>`;
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+renderTopics(TOPICS);
+renderBooks(BOOKS);
+populatePathSelect();
+updateCalcForm();
+</script>
+</body>
+</html>
