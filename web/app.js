@@ -3,6 +3,7 @@ const API_PROTOCOL = IS_HTTP_PAGE ? location.protocol : "http:";
 const API_HOST = location.hostname || "127.0.0.1";
 const API_BASES = [
   ...(IS_HTTP_PAGE ? [location.origin] : []),
+  `${API_PROTOCOL}//${API_HOST}:5051`,
   `${API_PROTOCOL}//${API_HOST}:8765`,
   `${API_PROTOCOL}//${API_HOST}:8766`,
 ].filter((value, index, values) => values.indexOf(value) === index);
