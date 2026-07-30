@@ -1,0 +1,95 @@
+{
+  "_comment": "FIL provider registry. Mirrors memory/corpora/registry.json in spirit: providers are DATA, not code. Vendor names appear here and in financial_data/providers/* only — never in gateway, agent, skill, or route code (the P8 seam). Adding a provider = adding an entry + a module with fetch(); no caller changes. `pit_capable` lists the kinds for which this provider can honestly answer an `as_of` query; a kind absent from that list still serves data, but the gateway will stamp as_of_honored=false so the caller knows the point-in-time guarantee does NOT hold.",
+  "providers": {
+    "sec-edgar": {
+      "id": "sec-edgar",
+      "name": "SEC EDGAR / XBRL companyfacts",
+      "module": "financial_data.providers.edgar",
+      "kinds": ["fundamentals_pit", "filings"],
+      "pit_capable": ["fundamentals_pit", "filings"],
+      "reliability": 1.0,
+      "priority": 10,
+      "rate_limit_per_sec": 8,
+      "requires_key": false,
+      "cost": "free",
+      "notes": "As-reported values keyed by FILING date. This is the primary fundamentals source precisely because `filed` is a first-class field: restatements appear as separate entries rather than overwriting history, which is what makes true point-in-time queries possible for free.",
+      "caveats": {}
+    },
+    "yfinance": {
+      "id": "yfinance",
+      "name": "Yahoo Finance (via yfinance)",
+      "module": "financial_data.providers.yfinance_bars",
+      "kinds": ["bars"],
+      "pit_capable": ["bars"],
+      "reliability": 0.6,
+      "priority": 50,
+      "rate_limit_per_sec": 2,
+      "requires_key": false,
+      "cost": "free",
+      "notes": "Demoted to fallback, not deleted (it is the incumbent price source for the 7-agent pipeline). Low reliability reflects unannounced schema drift and silent gaps, not price inaccuracy.",
+      "caveats": {
+        "bars": "Split/dividend adjustments are applied RETROACTIVELY: availability is point-in-time correct (a bar dated D was knowable at D's close), but the adjusted VALUE of an old bar changes after later corporate actions, so a value read today may differ from what a trader saw then. Availability guarantee holds; value stability does not."
+      }
+    },
+    "tiingo": {
+      "id": "tiingo",
+      "name": "Tiingo daily bars",
+      "module": "financial_data.providers.tiingo",
+      "kinds": ["bars"],
+      "pit_capable": ["bars"],
+      "reliability": 0.85,
+      "priority": 40,
+      "rate_limit_per_sec": 1,
+      "requires_key": "TIINGO_API_KEY",
+      "cost": "free tier (tiingo.com)",
+      "notes": "Key-gated: activates when TIINGO_API_KEY is in .env; until then it raises NotConfiguredError and the gateway falls through to yfinance with a warning naming the variable. Priority 40 (above yfinance's 50) so a configured key silently upgrades the bars path to a documented API.",
+      "caveats": {
+        "bars": "Adjusted OHLC (adj* fields): same retroactive-adjustment caveat as yfinance — availability PIT-correct, value stability not."
+      }
+    },
+    "fred": {
+      "id": "fred",
+      "name": "FRED macro series (St. Louis Fed)",
+      "module": "financial_data.providers.fred",
+      "kinds": ["macro"],
+      "pit_capable": [],
+      "reliability": 0.9,
+      "priority": 10,
+      "rate_limit_per_sec": 2,
+      "requires_key": false,
+      "cost": "free",
+      "notes": "Keyless via the public fredgraph.csv endpoint. Series: DGS10/DGS2/T10Y2Y/FEDFUNDS/UNRATE/CPIAUCSL/VIXCLS (+ any valid FRED id).",
+      "caveats": {
+        "macro": "CURRENT VINTAGE ONLY: macro series are routinely revised and this endpoint overwrites history with revisions (true vintages need ALFRED). pit_capable is empty on purpose — as_of queries get as_of_honored=false. Live context yes; backtesting on these numbers no."
+      }
+    },
+    "cboe": {
+      "id": "cboe",
+      "name": "CBOE VIX daily history",
+      "module": "financial_data.providers.cboe",
+      "kinds": ["macro"],
+      "pit_capable": ["macro"],
+      "reliability": 0.95,
+      "priority": 20,
+      "rate_limit_per_sec": 1,
+      "requires_key": false,
+      "cost": "free",
+      "notes": "Keyless full VIX OHLC history 1990->today (symbol VIX / ^VIX / VIXCLS only). Bar-date availability is honest (published at close, not restated).",
+      "caveats": {}
+    },
+    "finnhub": {
+      "id": "finnhub",
+      "name": "Finnhub earnings calendar",
+      "module": "financial_data.providers.finnhub_events",
+      "kinds": ["events"],
+      "pit_capable": [],
+      "reliability": 0.8,
+      "priority": 10,
+      "rate_limit_per_sec": 1,
+      "requires_key": "FINNHUB_API_KEY",
+      "cost": "free tier (finnhub.io)",
+      "notes": "Key-gated earnings calendar (dates + consensus EPS, past actuals). Future events are status=estimate with available_at=retrieval time; calendars shift, so pit_capable is empty.",
+      "caveats": {}
+    }
+  }
+}

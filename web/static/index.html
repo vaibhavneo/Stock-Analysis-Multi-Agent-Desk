@@ -1,0 +1,2655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Agent AI — 7-Agent Research Platform</title>
+<style>
+  :root {
+    --bg:       #080c14;
+    --bg2:      #0d1220;
+    --bg3:      #111827;
+    --border:   #1e2d45;
+    --accent:   #00d4ff;
+    --accent2:  #7c3aed;
+    --green:    #00e676;
+    --red:      #ff1744;
+    --yellow:   #ffea00;
+    --text:     #e0e6f0;
+    --muted:    #6b7fa3;
+    --card-bg:  #0f1929;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+
+  /* Header */
+  .header { background: linear-gradient(135deg, #0a0f1e 0%, #0d1a2d 100%); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(10px); }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .logo-text h1 { font-size: 18px; font-weight: 700; background: linear-gradient(90deg, var(--accent), #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .logo-text p { font-size: 11px; color: var(--muted); }
+  .badges { display: flex; gap: 8px; margin-left: auto; }
+  .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; border: 1px solid; }
+  .badge.live { color: var(--green); border-color: var(--green); background: rgba(0,230,118,.08); }
+  .badge.agents { color: var(--accent); border-color: var(--accent); background: rgba(0,212,255,.08); }
+  .badge.quant { color: #a78bfa; border-color: #a78bfa; background: rgba(167,139,250,.08); }
+
+  /* Search */
+  .search-bar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ticker-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 8px; font-size: 20px; font-weight: 700; width: 140px; letter-spacing: 2px; text-transform: uppercase; outline: none; transition: border-color .2s; }
+  .ticker-input:focus { border-color: var(--accent); }
+  .btn-analyze { background: linear-gradient(135deg, #00b4d8, var(--accent2)); border: none; color: #fff; padding: 10px 24px; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity .2s, transform .1s; }
+  .btn-analyze:hover { opacity: .9; transform: translateY(-1px); }
+  .btn-analyze:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .quick-picks { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .quick-picks span { color: var(--muted); font-size: 12px; }
+  .qbtn { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all .2s; }
+  .qbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Progress */
+  .progress-bar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 10px 24px; display: none; }
+  .progress-steps { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .step { padding: 4px 10px; border-radius: 20px; font-size: 11px; border: 1px solid var(--border); color: var(--muted); transition: all .3s; }
+  .step.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,.1); animation: pulse 1s infinite; }
+  .step.done { border-color: var(--green); color: var(--green); background: rgba(0,230,118,.08); }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+  .progress-msg { color: var(--muted); font-size: 12px; }
+
+  /* Layout */
+  .main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+  .empty-state { text-align: center; padding: 80px 20px; color: var(--muted); }
+  .empty-state h2 { font-size: 28px; color: var(--text); margin-bottom: 8px; }
+  .empty-state p { font-size: 15px; margin-bottom: 20px; }
+  .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; max-width: 900px; margin: 0 auto; }
+  .feature-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: left; }
+  .feature-card .icon { font-size: 24px; margin-bottom: 8px; }
+  .feature-card h4 { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+  .feature-card p { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* Dashboard */
+  .dashboard { display: none; }
+  .top-row { display: grid; grid-template-columns: 320px 1fr; gap: 16px; margin-bottom: 16px; }
+  .mid-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .full-row { margin-bottom: 16px; }
+
+  /* Cards */
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+
+  /* Verdict */
+  .verdict-card { background: var(--card-bg); border: 2px solid var(--border); border-radius: 16px; padding: 20px; position: relative; overflow: hidden; }
+  .verdict-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .verdict-card.buy::before { background: linear-gradient(90deg, var(--green), #00c853); border-color: var(--green); }
+  .verdict-card.sell::before { background: linear-gradient(90deg, var(--red), #d50000); border-color: var(--red); }
+  .verdict-card.hold::before { background: linear-gradient(90deg, var(--yellow), #ff8f00); border-color: var(--yellow); }
+  .verdict-badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 18px; border-radius: 30px; font-size: 22px; font-weight: 900; letter-spacing: 2px; margin-bottom: 12px; }
+  .verdict-badge.buy { background: rgba(0,230,118,.15); color: var(--green); border: 2px solid var(--green); }
+  .verdict-badge.sell { background: rgba(255,23,68,.15); color: var(--red); border: 2px solid var(--red); }
+  .verdict-badge.hold { background: rgba(255,234,0,.12); color: var(--yellow); border: 2px solid var(--yellow); }
+  .verdict-company { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .verdict-price { font-size: 28px; font-weight: 900; margin-bottom: 4px; }
+  .verdict-change { font-size: 13px; }
+  .price-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 14px; }
+  .price-item { background: var(--bg3); border-radius: 8px; padding: 10px; text-align: center; }
+  .price-item .label { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .price-item .value { font-size: 14px; font-weight: 700; }
+  .price-item .value.green { color: var(--green); }
+  .price-item .value.red { color: var(--red); }
+  .price-item .value.yellow { color: var(--yellow); }
+  .conviction-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .conviction-label { font-size: 11px; color: var(--muted); }
+  .conviction-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .conviction-badge.HIGH { background: rgba(0,230,118,.2); color: var(--green); }
+  .conviction-badge.MEDIUM { background: rgba(255,234,0,.2); color: var(--yellow); }
+  .conviction-badge.LOW { background: rgba(255,23,68,.15); color: var(--red); }
+  .verdict-summary { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 12px; font-style: italic; }
+
+  /* Grounded analysis panel */
+  .grounded-card { background: var(--card-bg); border: 1px solid #1a3a1a; border-radius: 12px; padding: 18px; margin-top: 16px; }
+  .grounded-header { display: flex; align-items: center; gap:10px; margin-bottom: 14px; }
+  .grounded-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 3px 10px; border-radius: 10px; letter-spacing: 1px; }
+  .grounded-badge.strategy { background: rgba(0,230,118,.15); color: var(--green); border: 1px solid rgba(0,230,118,.3); }
+  .grounded-badge.none { background: rgba(255,234,0,.12); color: var(--yellow); border: 1px solid rgba(255,234,0,.3); }
+  .grounded-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+  .grounded-item { background: var(--bg3); border-radius: 8px; padding: 10px; text-align: center; }
+  .grounded-item .gl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .grounded-item .gv { font-size: 13px; font-weight: 700; }
+  .grounded-note { font-size: 11px; color: var(--muted); line-height: 1.5; border-top: 1px solid var(--border); padding-top: 10px; }
+  .strategy-signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .sig-pill { font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 600; }
+  .sig-pill.bull { background: rgba(0,230,118,.15); color: var(--green); }
+  .sig-pill.bear { background: rgba(255,23,68,.12); color: var(--red); }
+  .sig-pill.flat { background: var(--bg3); color: var(--muted); }
+  /* Track history table */
+  .track-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+  .track-table th { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+  .track-table td { padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .track-table .pos { color: var(--green); } .track-table .neg { color: var(--red); }
+
+  /* Sparkline chart */
+  .chart-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  #sparkline-canvas { width: 100%; height: 140px; }
+
+  /* Signal meter */
+  .signal-meter { margin-bottom: 12px; }
+  .meter-track { background: linear-gradient(90deg, #ff1744, #ffea00 50%, #00e676); border-radius: 20px; height: 10px; position: relative; margin: 8px 0; }
+  .meter-needle { position: absolute; top: -4px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid var(--bg); box-shadow: 0 2px 6px rgba(0,0,0,.5); transform: translateX(-50%); transition: left 1s cubic-bezier(.34,1.56,.64,1); }
+  .meter-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+  .signal-score { font-size: 32px; font-weight: 900; text-align: center; margin: 4px 0; }
+  .signal-direction { text-align: center; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Indicators grid */
+  .indicators-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ind-item { background: var(--bg3); border-radius: 8px; padding: 10px; }
+  .ind-name { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 3px; }
+  .ind-value { font-size: 14px; font-weight: 700; }
+  .ind-signal { font-size: 10px; margin-top: 2px; }
+
+  /* Algo signals */
+  .algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .algo-item { background: var(--bg3); border-radius: 8px; padding: 10px; }
+  .algo-name { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 3px; }
+  .algo-value { font-size: 13px; font-weight: 700; }
+  .algo-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  /* Monte Carlo */
+  .mc-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .mc-label { width: 80px; color: var(--muted); }
+  .mc-track { flex: 1; background: var(--bg3); border-radius: 4px; height: 8px; position: relative; }
+  .mc-fill { height: 100%; border-radius: 4px; }
+  .mc-price { width: 70px; text-align: right; font-weight: 700; }
+
+  /* Signals list */
+  .signals-list { list-style: none; }
+  .signals-list li { padding: 6px 8px; border-radius: 6px; font-size: 12px; margin-bottom: 4px; display: flex; align-items: flex-start; gap: 6px; }
+  .signals-list li.bull { background: rgba(0,230,118,.07); color: #81c784; }
+  .signals-list li.bear { background: rgba(255,23,68,.07); color: #e57373; }
+  .signals-list li.neutral { background: rgba(255,255,255,.04); color: var(--muted); }
+  .sig-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .bull .sig-dot { background: var(--green); }
+  .bear .sig-dot { background: var(--red); }
+  .neutral .sig-dot { background: var(--muted); }
+
+  /* Social sentiment */
+  .social-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .social-source { background: var(--bg3); border-radius: 10px; padding: 12px; }
+  .social-source h4 { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .social-bar { display: flex; gap: 4px; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+  .social-bull { background: var(--green); }
+  .social-bear { background: var(--red); }
+  .social-stats { display: flex; justify-content: space-between; font-size: 11px; }
+  .st-bull { color: var(--green); font-weight: 700; }
+  .st-bear { color: var(--red); font-weight: 700; }
+  .reddit-posts { list-style: none; }
+  .reddit-posts li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+  .reddit-posts li:last-child { border-bottom: none; }
+  .reddit-sub { color: var(--accent); font-weight: 600; }
+
+  /* Fundamentals table */
+  .fund-table { width: 100%; border-collapse: collapse; }
+  .fund-table tr { border-bottom: 1px solid var(--border); }
+  .fund-table td { padding: 7px 4px; font-size: 12px; }
+  .fund-table td:first-child { color: var(--muted); }
+  .fund-table td:last-child { font-weight: 700; text-align: right; }
+
+  /* Analysis sections */
+  .analysis-tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: none; color: var(--muted); cursor: pointer; font-size: 12px; transition: all .2s; }
+  .tab-btn.active { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .analysis-text { font-size: 13px; line-height: 1.8; color: var(--text); white-space: pre-wrap; }
+  .streaming-cursor { display: inline-block; width: 8px; height: 14px; background: var(--accent); animation: blink .7s infinite; vertical-align: text-bottom; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* News */
+  .news-list { list-style: none; }
+  .news-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .news-item:last-child { border-bottom: none; }
+  .news-title { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+  .news-meta { font-size: 11px; color: var(--muted); }
+
+  /* Cases */
+  .cases-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .case-box { background: var(--bg3); border-radius: 10px; padding: 14px; }
+  .case-box.bull { border-left: 3px solid var(--green); }
+  .case-box.bear { border-left: 3px solid var(--red); }
+  .case-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .case-box.bull .case-title { color: var(--green); }
+  .case-box.bear .case-title { color: var(--red); }
+  .case-text { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+  /* Catalysts */
+  .catalysts-list { list-style: none; }
+  .catalysts-list li { padding: 5px 0; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); display: flex; gap: 6px; }
+  .catalysts-list li:last-child { border-bottom: none; }
+  .catalyst-dot { color: var(--accent); }
+
+  /* Candlestick patterns */
+  .pattern-list { list-style: none; }
+  .pattern-list li { padding: 5px 8px; border-radius: 6px; font-size: 11px; margin-bottom: 4px; background: rgba(124,58,237,.1); color: #c4b5fd; border: 1px solid rgba(124,58,237,.2); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Colors */
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .yellow { color: var(--yellow); }
+  .accent { color: var(--accent); }
+  .muted { color: var(--muted); }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .top-row, .mid-row, .bottom-row { grid-template-columns: 1fr; }
+    .cases-grid, .social-grid, .indicators-grid, .algo-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">📈</div>
+    <div class="logo-text">
+      <h1>STOCK AGENT AI</h1>
+      <p>7-Agent Research · Quant Signals · Social Intelligence</p>
+    </div>
+  </div>
+  <div class="badges">
+    <div class="badge live">● LIVE</div>
+    <div class="badge agents">7 AI Agents</div>
+    <div class="badge quant">Quant + Social</div>
+  </div>
+</div>
+
+<div class="search-bar" style="flex-direction:column;align-items:stretch;gap:10px">
+  <!-- Primary row: the one action most visits need — type a ticker, hit Analyze.
+       Quick Rec / Portfolio are secondary but still one click; cost basis is
+       tucked to the far right since it's optional context, not an action. -->
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <input type="text" class="ticker-input" id="ticker" placeholder="AAPL" value="" maxlength="10">
+    <button class="btn-analyze" id="analyzeBtn" onclick="analyze()">🔍 Analyze Stock</button>
+    <button class="btn-analyze" id="quickRecTopBtn" onclick="quickRecStandalone()"
+      style="background:var(--bg3);color:var(--accent);border:1px solid var(--border)"
+      title="Keyless 7-pillar computed recommendation — no LLM, no API key needed">🏛️ Quick Rec</button>
+    <button class="btn-analyze" id="portfolioToggleBtn" onclick="togglePortfolioCard()"
+      style="background:var(--bg3);color:var(--accent2);border:1px solid var(--border)"
+      title="Track your holdings and get a signal on each">💼 My Portfolio</button>
+    <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+      <label for="costBasis" style="font-size:11px;color:var(--muted);white-space:nowrap">My Avg Cost $</label>
+      <input type="number" id="costBasis" placeholder="0.00" step="0.01" min="0"
+        style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;font-weight:700;width:90px;outline:none;transition:border-color .2s"
+        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"
+        title="Enter your average purchase price to get position-aware P&L and recommendations">
+    </div>
+  </div>
+  <!-- Secondary row: quick-pick tickers, visually quieter — a shortcut, not a decision. -->
+  <div class="quick-picks" style="opacity:.8">
+    <span>Quick:</span>
+    <button class="qbtn" onclick="quickAnalyze('AAPL')">AAPL</button>
+    <button class="qbtn" onclick="quickAnalyze('MSFT')">MSFT</button>
+    <button class="qbtn" onclick="quickAnalyze('NVDA')">NVDA</button>
+    <button class="qbtn" onclick="quickAnalyze('TSLA')">TSLA</button>
+    <button class="qbtn" onclick="quickAnalyze('GOOGL')">GOOGL</button>
+    <button class="qbtn" onclick="quickAnalyze('META')">META</button>
+    <button class="qbtn" onclick="quickAnalyze('AMZN')">AMZN</button>
+    <button class="qbtn" onclick="quickAnalyze('SPY')">SPY</button>
+    <button class="qbtn" onclick="quickAnalyze('BTC-USD')">BTC</button>
+  </div>
+</div>
+
+<div class="card" id="portfolioCard" style="display:none;margin:16px 24px;max-width:1400px;margin-left:auto;margin-right:auto">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>💼 My Portfolio <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">— track holdings, get a signal on each</span></span>
+    <button onclick="togglePortfolioCard()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+    <input type="text" id="pfTicker" placeholder="TICKER" maxlength="10"
+      style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;font-weight:700;width:110px;text-transform:uppercase;outline:none">
+    <input type="number" id="pfShares" placeholder="Shares" step="0.0001" min="0"
+      style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;width:100px;outline:none">
+    <input type="number" id="pfAvgCost" placeholder="Avg Cost $" step="0.01" min="0"
+      style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;width:110px;outline:none">
+    <button class="btn-analyze" onclick="addPortfolioHolding()" style="padding:8px 18px;font-size:13px">+ Add Holding</button>
+    <button class="btn-analyze" id="pfAnalyzeBtn" onclick="analyzePortfolio()"
+      style="padding:8px 18px;font-size:13px;background:var(--bg3);color:var(--accent);border:1px solid var(--border)">📊 Quick Signals</button>
+    <button class="btn-analyze" id="pfBriefBtn" onclick="buildPortfolioBrief()"
+      style="padding:8px 18px;font-size:13px;background:linear-gradient(135deg,var(--accent2),#00b4d8)">🎯 Portfolio Brief</button>
+    <span style="font-size:10px;color:var(--muted)">Keyless — no API key. Saved in this browser only. Suggested actions, not automatic trades.</span>
+  </div>
+
+  <div id="pfEmpty" style="text-align:center;color:var(--muted);font-size:13px;padding:16px 0">
+    No holdings yet — add a ticker, share count, and your average cost above.
+  </div>
+
+  <div id="pfTableWrap" style="display:none;overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="color:var(--muted);text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:6px 8px"></th>
+          <th style="padding:6px 8px">Ticker</th>
+          <th style="padding:6px 8px;text-align:right">Shares</th>
+          <th style="padding:6px 8px;text-align:right">Avg Cost</th>
+          <th style="padding:6px 8px;text-align:right">Current</th>
+          <th style="padding:6px 8px;text-align:right">P&amp;L %</th>
+          <th style="padding:6px 8px;text-align:right">Weight</th>
+          <th style="padding:6px 8px">Action</th>
+          <th style="padding:6px 8px;text-align:right">Add Zone</th>
+          <th style="padding:6px 8px;text-align:right">Trim Zone</th>
+          <th style="padding:6px 8px;text-align:right">Exit</th>
+          <th style="padding:6px 8px;text-align:right">Target Wt</th>
+          <th style="padding:6px 8px"></th>
+        </tr>
+      </thead>
+      <tbody id="pfBody"></tbody>
+    </table>
+  </div>
+
+  <div id="pfSummary" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+    <!-- Book totals -->
+    <div style="display:flex;flex-wrap:wrap;gap:20px;margin-bottom:14px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Cost Basis</div>
+        <div style="font-size:16px;font-weight:800" id="pfTotalCost">—</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Market Value</div>
+        <div style="font-size:16px;font-weight:800" id="pfTotalValue">—</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Total P&amp;L</div>
+        <div style="font-size:16px;font-weight:800" id="pfTotalPL">—</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Return</div>
+        <div style="font-size:16px;font-weight:800" id="pfTotalPct">—</div></div>
+    </div>
+    <!-- Portfolio Brief summary: Stance · Concentration · Top 3 Actions · Evidence -->
+    <div id="pfBriefSummary" style="display:none;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:12px;background:var(--bg3);border-radius:10px" id="pfStanceBox">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Portfolio Stance</div>
+        <div style="font-size:20px;font-weight:900" id="pfStance">—</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px" id="pfStanceNote"></div>
+      </div>
+      <div style="padding:12px;background:var(--bg3);border-radius:10px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Concentration Risk</div>
+        <div id="pfConcentration" style="font-size:12px"></div>
+      </div>
+      <div style="padding:12px;background:var(--bg3);border-radius:10px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Top 3 Actions (by urgency)</div>
+        <div id="pfTop3" style="font-size:12px"></div>
+      </div>
+      <div style="padding:12px;background:var(--bg3);border-radius:10px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Evidence Confidence</div>
+        <div id="pfEvidence" style="font-size:12px"></div>
+      </div>
+    </div>
+    <div id="pfTiltFallback" style="font-size:11px;color:var(--muted);margin-top:8px">
+      Click <b>🎯 Portfolio Brief</b> for position-aware actions, price zones, target weights, and the portfolio stance. Suggested actions, not automatic trades.
+    </div>
+  </div>
+</div>
+
+<div class="progress-bar" id="progressBar">
+  <div class="progress-steps" id="progressSteps">
+    <div class="step" id="step-data">📡 Data</div>
+    <div class="step" id="step-social_data">📱 Social Data</div>
+    <div class="step" id="step-research">📰 Research</div>
+    <div class="step" id="step-fundamentals">📊 Fundamentals</div>
+    <div class="step" id="step-technical">📈 Technical</div>
+    <div class="step" id="step-risk">⚠️ Risk</div>
+    <div class="step" id="step-social">💬 Social Agent</div>
+    <div class="step" id="step-algo">🔢 Algo</div>
+    <div class="step" id="step-prediction">🎯 Prediction</div>
+    <div class="step" id="step-grounding">🧮 Grounding</div>
+    <div class="step" id="step-recommendation">🏛️ Recommendation</div>
+  </div>
+  <div class="progress-msg" id="progressMsg">Starting analysis...</div>
+</div>
+
+<div class="main">
+  <div class="empty-state" id="emptyState">
+    <h2>AI-Powered Stock Intelligence</h2>
+    <p>7 specialist AI agents + quantitative models + social sentiment analysis</p>
+    <div class="feature-grid">
+      <div class="feature-card"><div class="icon">📰</div><h4>News & Research</h4><p>Web search, Yahoo Finance news, macro context</p></div>
+      <div class="feature-card"><div class="icon">💬</div><h4>Social Sentiment</h4><p>Reddit (WSB, stocks, investing), StockTwits, financial forums</p></div>
+      <div class="feature-card"><div class="icon">🔢</div><h4>Quant Algo</h4><p>Z-score, momentum, linear regression, Monte Carlo GBM</p></div>
+      <div class="feature-card"><div class="icon">📊</div><h4>Fundamentals</h4><p>PE, EV/EBITDA, margins, growth, analyst targets</p></div>
+      <div class="feature-card"><div class="icon">📈</div><h4>Technical Analysis</h4><p>RSI, MACD, Bollinger Bands, ADX, OBV, 15+ indicators</p></div>
+      <div class="feature-card"><div class="icon">🎯</div><h4>AI Prediction</h4><p>BUY/SELL/HOLD with entry, target, stop-loss, R:R ratio</p></div>
+    </div>
+  </div>
+
+  <div class="dashboard" id="dashboard">
+
+    <!-- Row 1: Verdict + Chart -->
+    <div class="top-row">
+      <div class="verdict-card" id="verdictCard">
+        <div id="verdictLoading" style="color:var(--muted);text-align:center;padding:40px 0">
+          <div style="font-size:24px;margin-bottom:8px">🎯</div>
+          <div>Generating prediction...</div>
+        </div>
+        <div id="verdictContent" style="display:none">
+          <div id="verdictBadge" class="verdict-badge">--</div>
+          <div class="verdict-company" id="verdictCompany"></div>
+          <div class="verdict-price" id="verdictPrice"></div>
+          <div class="verdict-change" id="verdictChange"></div>
+          <div class="price-grid">
+            <div class="price-item">
+              <div class="label">Entry</div>
+              <div class="value accent" id="predEntry">--</div>
+            </div>
+            <div class="price-item">
+              <div class="label">Target</div>
+              <div class="value green" id="predTarget">--</div>
+            </div>
+            <div class="price-item">
+              <div class="label">Stop Loss</div>
+              <div class="value red" id="predStop">--</div>
+            </div>
+            <div class="price-item">
+              <div class="label">Upside</div>
+              <div class="value green" id="predUpside">--</div>
+            </div>
+            <div class="price-item">
+              <div class="label">Risk:Reward</div>
+              <div class="value yellow" id="predRR">--</div>
+            </div>
+            <div class="price-item">
+              <div class="label">Horizon</div>
+              <div class="value accent" id="predHorizon">--</div>
+            </div>
+          </div>
+          <div class="conviction-row">
+            <span class="conviction-label">Conviction:</span>
+            <span class="conviction-badge" id="convictionBadge">--</span>
+            <span class="conviction-label" style="margin-left:8px">Horizon:</span>
+            <span id="timeHorizon" style="font-size:11px;color:var(--muted)">--</span>
+          </div>
+          <div class="verdict-summary" id="verdictSummary"></div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="card-title">📊 Price History</div>
+        <canvas id="sparkline-canvas" height="140"></canvas>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)">
+          <span id="chartLow"></span>
+          <span id="chartTicker" style="color:var(--accent);font-weight:700"></span>
+          <span id="chartHigh"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced Analysis & Backtesting: the deep-verification tools (7-pillar
+         recommendation, decision report, backtest lab, cross-sectional ranking,
+         prediction calibration, data sources). Collapsed by default so a casual
+         "should I buy this" glance isn't buried under a wall of research-grade
+         dashboards — everything here is one click away, not deleted. -->
+    <div class="advanced-section" id="advancedSection" style="display:none;margin-bottom:16px;border:1px dashed var(--border);border-radius:12px;overflow:hidden">
+      <div onclick="toggleAdvanced()" style="cursor:pointer;user-select:none;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;background:var(--bg2);gap:12px;flex-wrap:wrap">
+        <div>
+          <span style="font-size:13px;font-weight:800;color:var(--text)">🔬 Advanced Analysis &amp; Backtesting</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:8px">7-pillar recommendation · decision report · backtest lab · cross-sectional ranking · prediction calibration</span>
+        </div>
+        <span id="advancedToggleLabel" style="color:var(--accent);font-weight:700;font-size:12px;white-space:nowrap">▸ Show</span>
+      </div>
+      <div id="advancedBody" style="display:none;padding:16px 18px 0">
+
+    <!-- 7-Pillar Investing Recommendation (full width) -->
+    <div class="card" id="recCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🏛️ 7-Pillar Investing Recommendation
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none">
+          <button onclick="quickRec()" id="quickRecBtn"
+            style="background:var(--bg3);color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">
+            ⚡ Quick Rec (no AI)</button>
+        </span>
+      </div>
+      <div id="recBody"><div style="color:var(--muted);text-align:center;padding:14px 0;font-size:13px">
+        Run an analysis, or click “Quick Rec” for the keyless computed recommendation.</div></div>
+    </div>
+
+    <!-- Composite Decision Report (full width) -->
+    <div class="card" id="decisionCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🎯 Composite Decision Report
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none">
+          <label style="color:var(--muted);font-size:11px;margin-right:8px">
+            <input type="checkbox" id="ownsPosition"> I own this stock</label>
+          <button onclick="fetchDecisionReport()" id="decisionBtn"
+            style="background:linear-gradient(90deg,var(--accent),var(--accent2));color:#04121b;border:none;border-radius:6px;padding:4px 14px;font-size:11px;font-weight:800;cursor:pointer">
+            📊 Generate Report</button>
+        </span>
+      </div>
+      <div id="decisionBody"><div style="color:var(--muted);text-align:center;padding:14px 0;font-size:13px">
+        One coherent BUY/HOLD/SELL decision synthesized from all agent outputs, backtests,
+        calibration, and cross-sectional ranking. Fully keyless — no LLM needed.</div></div>
+    </div>
+
+    <!-- Backtest Lab (full width) -->
+    <div class="card" id="btLabCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🧪 Backtest Lab
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none;font-size:12px">
+          <select id="btStrategy" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px"></select>
+          <select id="btPeriod" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px">
+            <option value="2y">2y</option><option value="3y">3y</option><option value="5y" selected>5y</option>
+          </select>
+          <label style="color:var(--muted);font-size:11px"><input type="checkbox" id="btCosts" checked> realistic costs</label>
+          <button onclick="runOneBacktest()" id="btOneBtn"
+            style="background:var(--bg3);color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">▶ Backtest</button>
+          <button onclick="runAllBacktests()" id="btAllBtn"
+            style="background:linear-gradient(90deg,var(--accent),var(--accent2));color:#04121b;border:none;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:800;cursor:pointer">⚔️ Compare all</button>
+        </span>
+      </div>
+      <div id="btLabBody"><div style="color:var(--muted);text-align:center;padding:14px 0;font-size:13px">
+        Pick a strategy and click Backtest, or “Compare all” to race the whole library
+        (net of realistic costs, dSR deflated against the true trial count).
+        Deeper validation (walk-forward + overfitting/PBO): <a href="/fil" style="color:var(--accent)">FIL page →</a></div></div>
+    </div>
+
+    <!-- Cross-Sectional Ranking (full width) -->
+    <div class="card" id="xsecCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🏦 Cross-Sectional Ranking (survivorship-safe, point-in-time)
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none">
+          <select id="xsecUniverse" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px"></select>
+          <input id="xsecAsOf" type="date" value="2023-06-01" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:11px">
+          <button onclick="runRanking()" id="xsecRunBtn" style="background:linear-gradient(90deg,var(--accent),var(--accent2));color:#04121b;border:none;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:800;cursor:pointer">Rank as-of</button>
+          <button onclick="evalRankings()" id="xsecEvalBtn" style="background:var(--bg3);color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">Evaluate history</button>
+        </span>
+      </div>
+      <div id="xsecBody"><div style="color:var(--muted);text-align:center;padding:14px 0;font-size:13px">
+        Rank an investable universe as of any date — using only securities and data available then.
+        Includes delisted names, preserves security identity across ticker changes, and is
+        reproducible &amp; look-ahead-free. Production survivorship safety needs a paid constituent dataset;
+        the reference universe is synthetic (labelled) to prove the mechanics.</div></div>
+    </div>
+
+    <!-- Prediction Ledger & Calibration (full width) -->
+    <div class="card" id="predLedgerCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🧾 Prediction Ledger &amp; Calibration
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none">
+          <select id="calSource" onchange="loadPredictionLedger()"
+            style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px" title="historical (replay) vs live predictions">
+            <option value="all" selected>all</option><option value="replay">historical</option><option value="live">live</option>
+          </select>
+          <select id="calHorizon" onchange="loadPredictionLedger()"
+            style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px">
+            <option value="1">1d</option><option value="5">5d</option>
+            <option value="20" selected>20d</option><option value="60">60d</option><option value="252">252d</option>
+          </select>
+          <button onclick="refreshOutcomes()" id="refreshOutcomesBtn"
+            style="background:var(--bg3);color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">↻ Refresh outcomes</button>
+        </span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:11px;color:var(--muted)">
+        <span title="Replay the recommendation pipeline on historical dates using only as-of data, so calibration can be measured now">⏮ Historical replay:</span>
+        <input id="rpTickers" placeholder="AAPL MSFT KO" value="AAPL MSFT"
+          style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;width:140px">
+        <input id="rpStart" type="date" value="2022-01-01" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:11px">
+        <input id="rpEnd" type="date" value="2024-06-01" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:11px">
+        <select id="rpCadence" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:11px">
+          <option value="M" selected>monthly</option><option value="W">weekly</option></select>
+        <button onclick="startReplay()" id="rpBtn"
+          style="background:linear-gradient(90deg,var(--accent),var(--accent2));color:#04121b;border:none;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:800;cursor:pointer">⏮ Replay history</button>
+        <span id="rpProgress" style="color:var(--accent)"></span>
+      </div>
+      <div id="predLedgerBody"><div style="color:var(--muted);text-align:center;padding:14px 0;font-size:13px">
+        Every recommendation is frozen at creation. Run a <b>Historical replay</b> to populate the ledger
+        with point-in-time-valid predictions and measure calibration now — or click “Refresh outcomes”
+        to evaluate matured live predictions (1/5/20/60/252 trading days).</div></div>
+    </div>
+
+    <!-- Data Sources (full width) -->
+    <div class="card" id="dataSrcCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🔌 Data Sources
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none">
+          <span id="macroStrip" style="font-size:11px;color:var(--muted)"></span>
+        </span>
+      </div>
+      <div id="dataSrcBody"></div>
+    </div>
+
+      </div>
+    </div>
+
+    <!-- Row 2: Signal Meter + Technical Indicators + Algo Score -->
+    <div class="mid-row">
+      <div class="card">
+        <div class="card-title">📡 Technical Signal Score</div>
+        <div class="signal-meter">
+          <div class="signal-score" id="signalScore">--</div>
+          <div class="signal-direction" id="signalDirection"></div>
+          <div class="meter-track">
+            <div class="meter-needle" id="meterNeedle" style="left:50%"></div>
+          </div>
+          <div class="meter-labels"><span class="red">BEARISH</span><span class="muted">NEUTRAL</span><span class="green">BULLISH</span></div>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:8px">
+          <div><div style="font-size:10px;color:var(--muted)">BULL SIGNALS</div><div style="font-size:18px;font-weight:700;color:var(--green)" id="bullCount">--</div></div>
+          <div><div style="font-size:10px;color:var(--muted)">BEAR SIGNALS</div><div style="font-size:18px;font-weight:700;color:var(--red)" id="bearCount">--</div></div>
+        </div>
+        <div style="margin-top:12px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Active Signals</div>
+          <ul class="signals-list" id="signalsList"></ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📈 Key Indicators</div>
+        <div class="indicators-grid" id="indicatorsGrid"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🔢 Algo Trading Signals</div>
+        <div id="algoScore" style="text-align:center;margin-bottom:12px">
+          <div style="font-size:28px;font-weight:900" id="algoScoreNum">--</div>
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px" id="algoDir"></div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Quantitative Score /100</div>
+        </div>
+        <div class="algo-grid" id="algoGrid"></div>
+      </div>
+    </div>
+
+    <!-- Row 3: Social + Monte Carlo -->
+    <div class="bottom-row">
+      <div class="card">
+        <div class="card-title">💬 Social Sentiment</div>
+        <div class="social-grid">
+          <div class="social-source">
+            <h4>Reddit</h4>
+            <div style="font-size:22px;font-weight:900;color:var(--accent)" id="redditMentions">0</div>
+            <div style="font-size:10px;color:var(--muted)">mentions this week</div>
+            <div style="margin-top:6px;font-size:11px;color:var(--muted)" id="redditSubs"></div>
+          </div>
+          <div class="social-source">
+            <h4>StockTwits</h4>
+            <div class="social-bar" id="stBar">
+              <div class="social-bull" id="stBullBar" style="width:50%"></div>
+              <div class="social-bear" id="stBearBar" style="width:50%"></div>
+            </div>
+            <div class="social-stats">
+              <span class="st-bull" id="stBullPct">--</span>
+              <span style="color:var(--muted);font-size:11px" id="stTotal">-- messages</span>
+              <span class="st-bear" id="stBearPct">--</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Top Reddit Posts</div>
+          <ul class="reddit-posts" id="redditPosts"></ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🎲 Monte Carlo Simulation (30 days, 1000 paths)</div>
+        <div id="mcChart" style="margin-bottom:12px"></div>
+        <div style="margin-top:8px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Candlestick Patterns</div>
+          <ul class="pattern-list" id="patternList"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analysis Tabs -->
+    <div class="full-row">
+      <div class="card">
+        <div class="card-title">🤖 AI Agent Analysis</div>
+        <div class="analysis-tabs">
+          <button class="tab-btn active" onclick="showTab('research')">📰 Research</button>
+          <button class="tab-btn" onclick="showTab('fundamentals')">📊 Fundamentals</button>
+          <button class="tab-btn" onclick="showTab('technical')">📈 Technical</button>
+          <button class="tab-btn" onclick="showTab('risk')">⚠️ Risk</button>
+          <button class="tab-btn" onclick="showTab('social')">💬 Social</button>
+          <button class="tab-btn" onclick="showTab('algo')">🔢 Algo</button>
+          <button class="tab-btn" onclick="showTab('verdict')" id="btn-verdict" style="background:var(--accent2);border-color:var(--accent2);color:#fff;font-weight:700">🎯 Decision Brief</button>
+        </div>
+        <div class="tab-content active" id="tab-research"><div class="analysis-text" id="text-research"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content" id="tab-fundamentals"><div class="analysis-text" id="text-fundamentals"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content" id="tab-technical"><div class="analysis-text" id="text-technical"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content" id="tab-risk"><div class="analysis-text" id="text-risk"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content" id="tab-social"><div class="analysis-text" id="text-social"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content" id="tab-algo"><div class="analysis-text" id="text-algo"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content" id="tab-verdict"><div id="verdictTabContent"><span class="muted">Waiting for analysis...</span></div></div>
+      </div>
+    </div>
+
+    <!-- Bull/Bear + Catalysts + News -->
+    <div class="bottom-row">
+      <div class="card">
+        <div class="card-title">⚡ Bull vs Bear Case</div>
+        <div class="cases-grid">
+          <div class="case-box bull">
+            <div class="case-title">Bull Case</div>
+            <div class="case-text" id="bullCase">—</div>
+          </div>
+          <div class="case-box bear">
+            <div class="case-title">Bear Case</div>
+            <div class="case-text" id="bearCase">—</div>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Key Catalysts to Watch</div>
+          <ul class="catalysts-list" id="catalystsList"></ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📰 Latest News</div>
+        <ul class="news-list" id="newsList"></ul>
+        <div style="margin-top:14px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Fundamentals</div>
+          <table class="fund-table" id="fundTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grounded Analysis Row -->
+    <div class="full-row" id="groundingRow" style="display:none">
+      <div class="grounded-card">
+        <div class="grounded-header">
+          <div class="card-title" style="margin:0">🧮 Grounded Analysis</div>
+          <span class="grounded-badge" id="groundingBadge">—</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:4px" id="groundingStrategyName">—</span>
+        </div>
+        <div class="grounded-grid">
+          <div class="grounded-item">
+            <div class="gl">Entry (computed)</div>
+            <div class="gv accent" id="gEntry">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">Target (2:1 R:R)</div>
+            <div class="gv" style="color:var(--green)" id="gTarget">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">Stop (1.5×ATR)</div>
+            <div class="gv" style="color:var(--red)" id="gStop">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">ATR-14</div>
+            <div class="gv" style="color:var(--muted)" id="gAtr">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">Backtest Sharpe</div>
+            <div class="gv" id="gSharpe">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">Defl. Sharpe (dSR)</div>
+            <div class="gv" id="gDsr">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">Kelly Size</div>
+            <div class="gv" style="color:var(--accent)" id="gKelly">—</div>
+          </div>
+          <div class="grounded-item">
+            <div class="gl">Hist. Hit Rate</div>
+            <div class="gv" id="gHitRate">—</div>
+          </div>
+        </div>
+        <div class="grounded-note" id="groundingNote"></div>
+        <div class="strategy-signals" id="strategySignals"></div>
+      </div>
+    </div>
+
+    <!-- Track History Row -->
+    <div class="full-row" id="trackRow" style="display:none">
+      <div class="card">
+        <div class="card-title">📋 Recommendation History <span id="trackCount" style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px"></span></div>
+        <table class="track-table">
+          <thead><tr><th>Date</th><th>Ticker</th><th>Action</th><th>Entry</th><th>Target</th><th>Stop</th><th>Strategy</th><th>Conviction</th><th>Outcome</th></tr></thead>
+          <tbody id="trackBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /dashboard -->
+</div><!-- /main -->
+
+<script>
+// Auto-detect API base URL — works whether opened via file:// or http://
+const API_BASE = (location.protocol === 'file:' || !location.hostname)
+  ? 'http://localhost:5051'
+  : '';
+
+let currentResult = null;
+
+// ── My Portfolio ─────────────────────────────────────────────────────────
+// Client-side only (localStorage) — no backend account system exists, and a
+// personal holdings list is exactly the kind of user data that shouldn't
+// need one. Each holding gets a signal from /api/recommendation, the same
+// keyless 7-pillar engine "Quick Rec" uses — deterministic, no API key.
+const PF_KEY = 'stockAgentPortfolio';
+
+function loadPortfolio() {
+  try { return JSON.parse(localStorage.getItem(PF_KEY)) || []; }
+  catch (e) { return []; }
+}
+
+function savePortfolio(holdings) {
+  localStorage.setItem(PF_KEY, JSON.stringify(holdings));
+}
+
+function togglePortfolioCard() {
+  const card = document.getElementById('portfolioCard');
+  const showing = card.style.display !== 'none';
+  if (showing) { card.style.display = 'none'; return; }
+  document.getElementById('emptyState').style.display = 'none';
+  card.style.display = 'block';
+  renderPortfolioTable();
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function addPortfolioHolding() {
+  const tickerEl = document.getElementById('pfTicker');
+  const sharesEl = document.getElementById('pfShares');
+  const costEl   = document.getElementById('pfAvgCost');
+  const ticker = tickerEl.value.trim().toUpperCase();
+  const shares = parseFloat(sharesEl.value);
+  const avgCost = parseFloat(costEl.value);
+  if (!ticker) { alert('Enter a ticker'); return; }
+  if (!(shares > 0)) { alert('Enter a share count greater than 0'); return; }
+  if (!(avgCost > 0)) { alert('Enter your average cost per share'); return; }
+
+  const holdings = loadPortfolio();
+  const existing = holdings.find(h => h.ticker === ticker);
+  if (existing) {
+    // Merge into existing position: blend average cost by dollar-weighted shares.
+    const totalShares = existing.shares + shares;
+    existing.avgCost = (existing.avgCost * existing.shares + avgCost * shares) / totalShares;
+    existing.shares = totalShares;
+  } else {
+    holdings.push({ticker, shares, avgCost, current: null, action: null, composite: null, conviction: null});
+  }
+  savePortfolio(holdings);
+  tickerEl.value = ''; sharesEl.value = ''; costEl.value = '';
+  renderPortfolioTable();
+}
+
+function removePortfolioHolding(ticker) {
+  const holdings = loadPortfolio().filter(h => h.ticker !== ticker);
+  savePortfolio(holdings);
+  renderPortfolioTable();
+}
+
+function analyzeHoldingFromPortfolio(ticker, avgCost) {
+  document.getElementById('ticker').value = ticker;
+  document.getElementById('costBasis').value = avgCost != null ? avgCost.toFixed(2) : '';
+  document.getElementById('portfolioCard').style.display = 'none';
+  analyze();
+}
+
+const PF_ACTION_COLOR = {BUY:'var(--green)', ACCUMULATE:'var(--green)', HOLD:'var(--yellow)', REDUCE:'var(--red)', SELL:'var(--red)'};
+// Position-action palette (ADD/HOLD/TRIM/EXIT/WAIT) for the Portfolio Brief.
+const PF_POS_COLOR = {ADD:'var(--green)', HOLD:'var(--yellow)', TRIM:'#ff9800', EXIT:'var(--red)', WAIT:'var(--muted)'};
+
+// Full recommendations captured during Quick Signals, kept in memory (not
+// persisted) so the Portfolio Brief can use the fast path and skip re-fetching.
+let _pfRecCache = {};
+// Per-ticker Portfolio Brief output, and which rows are expanded.
+let _pfBrief = {};          // ticker -> holding brief
+let _pfBriefPortfolio = null;
+let _pfExpanded = {};       // ticker -> bool
+
+function renderPortfolioTable() {
+  const holdings = loadPortfolio();
+  document.getElementById('pfEmpty').style.display = holdings.length ? 'none' : 'block';
+  document.getElementById('pfTableWrap').style.display = holdings.length ? 'block' : 'none';
+  document.getElementById('pfSummary').style.display = holdings.length ? 'block' : 'none';
+
+  const f2 = v => v != null ? '$' + Number(v).toFixed(2) : '—';
+  const zone = (lo, hi) => (lo == null ? '—' : (hi != null ? `$${lo.toFixed(0)}–${hi.toFixed(0)}` : `≥$${lo.toFixed(0)}`));
+
+  const rows = holdings.map(h => {
+    const b = _pfBrief[h.ticker];
+    const current = b ? b.current_price : h.current;
+    const plPct = current != null ? (current - h.avgCost) / h.avgCost * 100 : null;
+    const plColor = plPct == null ? 'var(--muted)' : plPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const sign = plPct != null && plPct >= 0 ? '+' : '';
+    const weight = b ? b.current_weight_pct : null;
+
+    // Action + zones + target weight (only present once a brief has run).
+    let actionCell = '<span style="color:var(--muted);font-size:11px">—</span>';
+    let addCell = '—', trimCell = '—', exitCell = '—', targetCell = '—';
+    if (b) {
+      const col = PF_POS_COLOR[b.position_action] || 'var(--muted)';
+      const owFlag = b.overweight ? ' <span style="font-size:9px;color:#ff9800" title="over max weight">⚠</span>' : '';
+      actionCell = `<span style="color:${col};font-weight:800">${b.position_action}</span>${owFlag}`;
+      const lv = b.levels || {};
+      if (lv.status === 'LEVEL_UNAVAILABLE') { addCell = trimCell = exitCell = '<span style="color:var(--muted);font-size:10px">n/a</span>'; }
+      else {
+        addCell = lv.add_zone ? zone(lv.add_zone[0], lv.add_zone[1]) : '<span style="color:var(--muted)">—</span>';
+        trimCell = zone(lv.trim_zone_low, lv.trim_zone_high);
+        exitCell = lv.exit_level != null ? '$' + lv.exit_level.toFixed(0) : '—';
+      }
+      targetCell = b.target_weight_pct != null
+        ? `${b.target_weight_pct.toFixed(0)}%<span style="color:var(--muted);font-size:9px">/${b.max_weight_pct.toFixed(0)}</span>` : '—';
+    } else if (h.action) {
+      // Pre-brief: show the raw Quick Signal so the row isn't empty.
+      const col = PF_ACTION_COLOR[h.action] || 'var(--muted)';
+      actionCell = `<span style="color:${col};font-weight:700;font-size:11px">${h.action}</span>`;
+    }
+
+    const expanded = _pfExpanded[h.ticker];
+    const caret = b ? (expanded ? '▾' : '▸') : '';
+    const mainRow = `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 8px;cursor:${b?'pointer':'default'};color:var(--accent)" ${b?`onclick="togglePfRow('${h.ticker}')"`:''}>${caret}</td>
+      <td style="padding:6px 8px;font-weight:800;cursor:pointer;color:var(--accent)"
+        onclick="analyzeHoldingFromPortfolio('${h.ticker}', ${h.avgCost})" title="Run full AI analysis on this ticker">${h.ticker}</td>
+      <td style="padding:6px 8px;text-align:right">${h.shares}</td>
+      <td style="padding:6px 8px;text-align:right">${f2(h.avgCost)}</td>
+      <td style="padding:6px 8px;text-align:right">${f2(current)}</td>
+      <td style="padding:6px 8px;text-align:right;color:${plColor};font-weight:700">${plPct!=null?sign+plPct.toFixed(1)+'%':'—'}</td>
+      <td style="padding:6px 8px;text-align:right;color:${b&&b.overweight?'#ff9800':'var(--text)'}">${weight!=null?weight.toFixed(1)+'%':'—'}</td>
+      <td style="padding:6px 8px">${actionCell}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:11px">${addCell}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:11px">${trimCell}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:11px">${exitCell}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:11px">${targetCell}</td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="removePortfolioHolding('${h.ticker}')"
+        style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px" title="Remove">✕</button></td>
+    </tr>`;
+
+    const detailRow = (b && expanded) ? `<tr><td colspan="13" style="padding:0 8px 12px 32px;background:var(--bg3)">${_pfHoldingDetailHtml(b)}</td></tr>` : '';
+    return mainRow + detailRow;
+  }).join('');
+  document.getElementById('pfBody').innerHTML = rows;
+
+  updatePortfolioTotals(holdings);
+  if (_pfBriefPortfolio) _renderPfBriefSummary(_pfBriefPortfolio);
+}
+
+// Expandable per-holding "Decision Brief": 3 reasons, upgrade/downgrade, confidence,
+// review, target/max weight, and a pointer to the full seven-agent output.
+function _pfHoldingDetailHtml(b) {
+  const conf = b.confidence || {};
+  const reasons = (b.reasons || []).map(r => `<div style="font-size:11px;color:var(--text);padding:2px 0">• ${r}</div>`).join('');
+  const ups = (b.upgrade_conditions || []).map(t => `<div style="font-size:11px;color:var(--text);padding:1px 0">↑ ${t}</div>`).join('');
+  const downs = (b.downgrade_conditions || []).map(t => `<div style="font-size:11px;color:var(--text);padding:1px 0">↓ ${t}</div>`).join('');
+  const pc = (b.detail_brief||{}).position_context;
+  const objNote = (b.objective_action && b.objective_action !== (b.detail_brief||{}).final_action)
+    ? `<span style="color:var(--yellow)">Objective stock verdict alone: <b>${b.objective_action}</b> — your position/weight changes the call.</span>` : '';
+  return `
+    <div style="padding:10px 0">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">3 Decisive Reasons</div>
+          ${reasons}
+          ${objNote ? `<div style="font-size:11px;margin-top:6px">${objNote}</div>` : ''}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-bottom:2px">Upgrade If</div>${ups}</div>
+          <div><div style="font-size:10px;color:var(--red);text-transform:uppercase;margin-bottom:2px">Downgrade If</div>${downs}</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px">
+        <div><span style="color:var(--muted)">Thesis</span> <b>${conf.thesis_confidence||'—'}</b></div>
+        <div><span style="color:var(--muted)">Data</span> <b>${conf.data_confidence||'—'}</b></div>
+        <div><span style="color:var(--muted)">Stat edge</span> <b>${conf.statistical_edge||'—'}</b></div>
+        <div><span style="color:var(--muted)">Alloc/Rank</span> <b>${conf.cross_sectional_rank||'—'}</b></div>
+        <div><span style="color:var(--muted)">Target/Max wt</span> <b>${b.target_weight_pct!=null?b.target_weight_pct.toFixed(1):'—'}% / ${b.max_weight_pct}%</b></div>
+        <div><span style="color:var(--muted)">Review</span> <b>${b.review_note||'—'}</b></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Full seven-agent output: click the ticker to open the detailed analysis with all six agent tabs.</div>
+    </div>`;
+}
+
+function togglePfRow(ticker) {
+  _pfExpanded[ticker] = !_pfExpanded[ticker];
+  renderPortfolioTable();
+}
+
+function updatePortfolioTotals(holdings) {
+  const priceOf = h => (_pfBrief[h.ticker] ? _pfBrief[h.ticker].current_price : h.current);
+  const totalCost = holdings.reduce((s,h) => s + h.avgCost * h.shares, 0);
+  const totalValue = holdings.reduce((s,h) => { const c = priceOf(h); return s + (c != null ? c : h.avgCost) * h.shares; }, 0);
+  const totalPL = totalValue - totalCost;
+  const totalPct = totalCost > 0 ? (totalPL / totalCost * 100) : 0;
+  const plColor = totalPL >= 0 ? 'var(--green)' : 'var(--red)';
+  const sign = totalPL >= 0 ? '+' : '';
+
+  document.getElementById('pfTotalCost').textContent = '$' + totalCost.toFixed(2);
+  document.getElementById('pfTotalValue').textContent = '$' + totalValue.toFixed(2);
+  const plEl = document.getElementById('pfTotalPL');
+  plEl.textContent = sign + '$' + Math.abs(totalPL).toFixed(2);
+  plEl.style.color = plColor;
+  const pctEl = document.getElementById('pfTotalPct');
+  pctEl.textContent = sign + totalPct.toFixed(1) + '%';
+  pctEl.style.color = plColor;
+}
+
+// Quick Signals: the fast per-ticker action + composite (existing behavior),
+// now ALSO caching the full recommendation for the Portfolio Brief fast path.
+async function analyzePortfolio() {
+  const holdings = loadPortfolio();
+  if (!holdings.length) { alert('Add at least one holding first'); return; }
+  const btn = document.getElementById('pfAnalyzeBtn');
+  btn.disabled = true;
+
+  for (let i = 0; i < holdings.length; i++) {
+    const h = holdings[i];
+    btn.textContent = `⏳ ${h.ticker} (${i+1}/${holdings.length})…`;
+    try {
+      const resp = await fetch(API_BASE + '/api/recommendation', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ticker: h.ticker})
+      });
+      const rec = await resp.json();
+      if (!rec.error) {
+        h.current = rec.current_price;
+        h.action = rec.action;
+        h.composite = rec.composite;
+        h.conviction = rec.conviction;
+        _pfRecCache[h.ticker] = rec;   // keep the full rec for the Brief fast path
+      }
+    } catch (e) { /* leave this holding unpriced, continue with the rest */ }
+    savePortfolio(holdings);
+    renderPortfolioTable();
+  }
+  btn.disabled = false;
+  btn.textContent = '📊 Quick Signals';
+}
+
+// Portfolio Brief: position- and weight-aware actions + zones + portfolio stance.
+async function buildPortfolioBrief() {
+  const holdings = loadPortfolio();
+  if (!holdings.length) { alert('Add at least one holding first'); return; }
+  const btn = document.getElementById('pfBriefBtn');
+  btn.disabled = true; btn.textContent = '⏳ Building brief…';
+  try {
+    const payload = {holdings: holdings.map(h => {
+      const o = {ticker: h.ticker, shares: h.shares, avg_cost: h.avgCost};
+      if (_pfRecCache[h.ticker]) o.recommendation = _pfRecCache[h.ticker];  // fast path
+      return o;
+    })};
+    const resp = await fetch(API_BASE + '/api/portfolio-brief', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const result = await resp.json();
+    if (result.error) { alert('Portfolio Brief failed: ' + result.error); return; }
+    _pfBrief = {};
+    (result.holdings || []).forEach(b => { _pfBrief[b.ticker] = b; });
+    _pfBriefPortfolio = result.portfolio;
+    document.getElementById('pfBriefSummary').style.display = 'grid';
+    document.getElementById('pfTiltFallback').style.display = 'none';
+    renderPortfolioTable();
+  } catch (e) {
+    alert('Portfolio Brief failed: ' + e);
+  } finally {
+    btn.disabled = false; btn.textContent = '🎯 Portfolio Brief';
+  }
+}
+
+function _renderPfBriefSummary(port) {
+  const stanceColors = {'ELEVATED RISK':'var(--red)','CONCENTRATED':'#ff9800','CONSTRUCTIVE':'var(--green)','BALANCED':'var(--yellow)','STABLE':'var(--accent)'};
+  const st = port.stance || {};
+  const stEl = document.getElementById('pfStance');
+  stEl.textContent = st.label || '—';
+  stEl.style.color = stanceColors[st.label] || 'var(--text)';
+  document.getElementById('pfStanceNote').textContent = st.note || '';
+  document.getElementById('pfStanceBox').style.border = `1px solid ${stanceColors[st.label]||'var(--border)'}`;
+
+  const conc = (port.concentration_risks || []).map(c =>
+    `<div style="padding:2px 0">${c.ticker} <b style="color:${c.over_max?'#ff9800':'var(--text)'}">${c.weight_pct.toFixed(1)}%</b>${c.over_max?' <span style="font-size:9px;color:#ff9800">over max</span>':''}</div>`).join('')
+    || '<span style="color:var(--muted)">No positions</span>';
+  document.getElementById('pfConcentration').innerHTML = conc +
+    (port.overweight_holdings && port.overweight_holdings.length
+      ? `<div style="font-size:10px;color:#ff9800;margin-top:4px">${port.overweight_holdings.length} holding(s) exceed the ${port.max_weight_pct}% max weight.</div>` : '');
+
+  const top3 = (port.top_3_actions || []).map(a =>
+    `<div style="padding:2px 0"><b style="color:${PF_POS_COLOR[a.action]||'var(--text)'}">${a.action}</b> ${a.ticker} <span style="color:var(--muted);font-size:10px">— ${a.reason}</span></div>`).join('')
+    || '<span style="color:var(--muted)">No actions — all holdings HOLD.</span>';
+  document.getElementById('pfTop3').innerHTML = top3;
+
+  const bestAdd = port.best_add_opportunity;
+  const topTrim = port.top_priority_trim_exit;
+  document.getElementById('pfEvidence').innerHTML = `
+    <div style="padding:1px 0"><span style="color:var(--muted)">Data confidence</span> <b>${port.data_confidence||'—'}</b></div>
+    <div style="padding:1px 0"><span style="color:var(--muted)">Calibration</span> <b>${port.calibration_confidence||'—'}</b></div>
+    ${bestAdd ? `<div style="padding:1px 0;color:var(--green)">Best add: <b>${bestAdd.ticker}</b></div>` : ''}
+    ${topTrim ? `<div style="padding:1px 0;color:#ff9800">Address first: <b>${topTrim.action} ${topTrim.ticker}</b></div>` : ''}`;
+}
+
+// Check server status on load
+async function checkStatus() {
+  try {
+    const r = await fetch(API_BASE + '/api/status');
+    if (!r.ok) throw new Error('server down');
+    const s = await r.json();
+    if (!s.key_set) {
+      showKeyBanner();
+    } else {
+      hideKeyBanner();
+    }
+  } catch(e) {
+    showKeyBanner('Server not running. Open Terminal and run: cd ~/Desktop/"Agentic AI"/stock_agent && python3 web/app.py');
+  }
+}
+
+function showKeyBanner(msg) {
+  let b = document.getElementById('keyBanner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'keyBanner';
+    b.style.cssText = 'background:#1a0a00;border-bottom:1px solid #ff6d00;padding:12px 24px;display:flex;align-items:center;gap:12px;font-size:13px;';
+    document.body.insertBefore(b, document.body.children[1]);
+  }
+  b.innerHTML = msg || `
+    <span style="color:#ff9800;font-size:18px">⚠️</span>
+    <span style="color:#ffcc80"><b>DeepSeek API key not set.</b> Get a free key at <b>platform.deepseek.com</b>, then create this file:</span>
+    <code style="background:#000;padding:4px 10px;border-radius:4px;color:#69f0ae;font-size:12px">stock_agent/.env</code>
+    <span style="color:#ffcc80">with content:</span>
+    <code style="background:#000;padding:4px 10px;border-radius:4px;color:#69f0ae;font-size:12px">DEEPSEEK_API_KEY=sk-your-key-here</code>
+    <span style="color:#ffcc80">then restart the server.</span>
+    <button onclick="checkStatus()" style="margin-left:auto;background:#ff9800;border:none;color:#000;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700">Recheck</button>
+  `;
+}
+
+function hideKeyBanner() {
+  const b = document.getElementById('keyBanner');
+  if (b) b.remove();
+}
+
+window.addEventListener('load', () => setTimeout(checkStatus, 500));
+
+const STEPS = ['data','social_data','research','fundamentals','technical','risk','social','algo','prediction','grounding','recommendation'];
+
+function setStep(stage, done) {
+  const el = document.getElementById('step-' + stage);
+  if (!el) return;
+  STEPS.forEach(s => {
+    const e = document.getElementById('step-' + s);
+    if (e) e.classList.remove('active');
+  });
+  if (!done) el.classList.add('active');
+  else el.classList.add('done');
+}
+
+function quickAnalyze(ticker) {
+  document.getElementById('ticker').value = ticker;
+  analyze();
+}
+
+async function analyze() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) {
+    // If the user is looking at their portfolio (card open, holdings present),
+    // an empty "Analyze Stock" almost always means "analyze my portfolio" — so
+    // offer to run the Portfolio Brief instead of a dead-end ticker alert.
+    const pfOpen = document.getElementById('portfolioCard').style.display !== 'none';
+    if (pfOpen && loadPortfolio().length) {
+      if (confirm('No ticker entered. Analyze your whole portfolio instead?')) {
+        buildPortfolioBrief();
+      }
+      return;
+    }
+    alert('Please enter a ticker symbol (or open “My Portfolio” to analyze your holdings).');
+    return;
+  }
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('progressBar').style.display = 'block';
+  document.getElementById('analyzeBtn').disabled = true;
+  document.getElementById('analyzeBtn').textContent = '⏳ Analyzing...';
+
+  // Reset UI
+  STEPS.forEach(s => {
+    const e = document.getElementById('step-' + s);
+    if (e) { e.className = 'step'; }
+  });
+  document.getElementById('verdictLoading').style.display = 'block';
+  document.getElementById('verdictContent').style.display = 'none';
+  ['research','fundamentals','technical','risk','social','algo'].forEach(t => {
+    document.getElementById('text-' + t).innerHTML = '<span class="muted">Agent running...</span>';
+  });
+  document.getElementById('bullCase').textContent = '—';
+  document.getElementById('bearCase').textContent = '—';
+  document.getElementById('catalystsList').innerHTML = '';
+  document.getElementById('newsList').innerHTML = '';
+  document.getElementById('fundTable').innerHTML = '';
+  document.getElementById('signalsList').innerHTML = '';
+  document.getElementById('indicatorsGrid').innerHTML = '';
+  document.getElementById('algoGrid').innerHTML = '';
+  document.getElementById('redditPosts').innerHTML = '';
+  document.getElementById('mcChart').innerHTML = '';
+  document.getElementById('patternList').innerHTML = '';
+
+  // First do quick data fetch for immediate display
+  try {
+    const qr = await fetch(API_BASE + '/api/quick', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ticker})
+    });
+    if (qr.ok) {
+      const q = await qr.json();
+      renderQuickData(q);
+    }
+  } catch(e) {}
+
+  // Stream full analysis
+  const es = new EventSource(API_BASE + '/api/analyze/stream?_=' + Date.now());
+
+  // We need POST, so use fetch + ReadableStream
+  es.close();
+
+  const resp = await fetch(API_BASE + '/api/analyze/stream', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ticker})
+  });
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const done = () => {
+    document.getElementById('analyzeBtn').disabled = false;
+    document.getElementById('analyzeBtn').textContent = '🔍 Analyze Stock';
+    STEPS.forEach(s => {
+      const e = document.getElementById('step-' + s);
+      if (e && !e.classList.contains('done')) e.classList.remove('active');
+    });
+    setTimeout(() => {
+      document.getElementById('progressBar').style.display = 'none';
+    }, 2000);
+  };
+
+  while (true) {
+    const {value, done: streamDone} = await reader.read();
+    if (streamDone) { done(); break; }
+    buffer += decoder.decode(value, {stream: true});
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+    for (const part of parts) {
+      if (!part.trim()) continue;
+      const lines = part.split('\n');
+      let evtType = 'message', evtData = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) evtType = line.slice(7).trim();
+        if (line.startsWith('data: ')) evtData = line.slice(6);
+      }
+      if (evtType === 'done') { done(); return; }
+      try {
+        const payload = JSON.parse(evtData);
+        handleEvent(evtType, payload);
+      } catch(e) {}
+    }
+  }
+}
+
+function handleEvent(type, payload) {
+  if (type === 'progress') {
+    document.getElementById('progressMsg').textContent = payload.msg || '';
+    setStep(payload.stage, false);
+    // Mark previous steps done
+    const idx = STEPS.indexOf(payload.stage);
+    for (let i = 0; i < idx; i++) setStep(STEPS[i], true);
+    return;
+  }
+  if (type === 'result') {
+    currentResult = payload;
+    renderFullResult(payload);
+    STEPS.forEach(s => setStep(s, true));
+  }
+  if (type === 'error') {
+    document.getElementById('progressMsg').textContent = 'Error: ' + (payload.error || 'Unknown error');
+    document.getElementById('analyzeBtn').disabled = false;
+    document.getElementById('analyzeBtn').textContent = '🔍 Analyze Stock';
+  }
+}
+
+function renderQuickData(q) {
+  // Price chart
+  if (q.sparkline && q.sparkline.length > 0) drawSparkline(q.sparkline, q.ticker);
+
+  // Signal meter
+  const sig = q.signal_summary || {};
+  document.getElementById('signalScore').textContent = sig.score ?? '--';
+  const dir = sig.direction || 'NEUTRAL';
+  document.getElementById('signalDirection').textContent = dir;
+  document.getElementById('signalDirection').className = 'signal-direction ' + (dir === 'BULLISH' ? 'green' : dir === 'BEARISH' ? 'red' : 'muted');
+  const needle = document.getElementById('meterNeedle');
+  needle.style.left = (sig.score ?? 50) + '%';
+  document.getElementById('bullCount').textContent = sig.bull_signals ?? '--';
+  document.getElementById('bearCount').textContent = sig.bear_signals ?? '--';
+
+  // Signals list
+  const sl = document.getElementById('signalsList');
+  sl.innerHTML = '';
+  (sig.signals || []).forEach(s => {
+    const isBull = s.includes('bullish') || s.includes('oversold') || s.includes('above') || s.includes('golden');
+    const isBear = s.includes('bearish') || s.includes('overbought') || s.includes('below') || s.includes('death');
+    const cls = isBull ? 'bull' : isBear ? 'bear' : 'neutral';
+    sl.innerHTML += `<li class="${cls}"><span class="sig-dot"></span>${s}</li>`;
+  });
+
+  // Indicators grid
+  const ind = q.indicators || {};
+  const fundData = q.fundamentals || {};
+  const ig = document.getElementById('indicatorsGrid');
+  ig.innerHTML = '';
+  const indItems = [
+    {label:'RSI (14)', value: ind.rsi_14, signal: ind.rsi_signal, format: v => v?.toFixed(1)},
+    {label:'MACD', value: ind.macd, signal: ind.macd_cross, format: v => v?.toFixed(3)},
+    {label:'SMA 50', value: ind.sma_50, signal: ind.above_sma_50 ? 'above' : 'below', format: v => '$'+v?.toFixed(2)},
+    {label:'SMA 200', value: ind.sma_200, signal: ind.ma_cross, format: v => v ? '$'+v?.toFixed(2) : 'N/A'},
+    {label:'BB %', value: ind.bb_pct, signal: ind.bb_pct > 80 ? 'upper' : ind.bb_pct < 20 ? 'lower' : 'middle', format: v => v?.toFixed(0)+'%'},
+    {label:'ADX', value: ind.adx, signal: ind.trend_strength, format: v => v?.toFixed(1)},
+    {label:'Vol Ratio', value: ind.volume_ratio, signal: ind.volume_ratio > 1.5 ? 'high' : 'normal', format: v => v?.toFixed(2)+'x'},
+    {label:'ATR (14)', value: ind.atr_14, signal: '', format: v => '$'+v?.toFixed(2)},
+  ];
+  indItems.forEach(item => {
+    const sigColor = item.signal?.includes('bull') || item.signal === 'golden' || item.signal === 'above' || item.signal === 'oversold' ? 'var(--green)' :
+                     item.signal?.includes('bear') || item.signal === 'death' || item.signal === 'below' || item.signal === 'overbought' ? 'var(--red)' : 'var(--accent)';
+    ig.innerHTML += `
+      <div class="ind-item">
+        <div class="ind-name">${item.label}</div>
+        <div class="ind-value" style="color:${sigColor}">${item.value != null ? item.format(item.value) : 'N/A'}</div>
+        <div class="ind-signal" style="color:var(--muted)">${item.signal || ''}</div>
+      </div>`;
+  });
+
+  // Algo signals
+  const algo = q.algo_signals || {};
+  const as = document.getElementById('algoScoreNum');
+  const ad = document.getElementById('algoDir');
+  as.textContent = algo.algo_score ?? '--';
+  as.style.color = algo.algo_direction === 'BULLISH' ? 'var(--green)' : algo.algo_direction === 'BEARISH' ? 'var(--red)' : 'var(--yellow)';
+  ad.textContent = algo.algo_direction || '';
+  ad.style.color = as.style.color;
+
+  const ag = document.getElementById('algoGrid');
+  ag.innerHTML = '';
+  const algoItems = [
+    {name:'Mean Reversion', value: algo.mean_reversion_signal, sub: `Z=${algo.mean_reversion_zscore}`},
+    {name:'Momentum', value: algo.momentum_signal, sub: `3M: ${algo.momentum_3m}%`},
+    {name:'Lin Reg Trend', value: algo.linreg_signal, sub: `R²=${algo.linreg_r_squared}`},
+    {name:'Vol Regime', value: algo.vol_regime, sub: `HV=${algo.historical_volatility_20d}%`},
+    {name:'Vol-Price', value: algo.volume_price_signal, sub: '5-day signal'},
+    {name:'Momentum 1M', value: algo.momentum_1m != null ? (algo.momentum_1m > 0 ? '+' : '') + algo.momentum_1m + '%' : 'N/A', sub: 'vs prior month'},
+  ];
+  algoItems.forEach(item => {
+    const isBull = String(item.value).includes('BULL') || String(item.value).includes('BUY') || String(item.value).includes('UPTREND') || String(item.value).includes('BREAKOUT');
+    const isBear = String(item.value).includes('BEAR') || String(item.value).includes('SELL') || String(item.value).includes('DOWN') || String(item.value).includes('BREAKDOWN');
+    const c = isBull ? 'var(--green)' : isBear ? 'var(--red)' : 'var(--yellow)';
+    ag.innerHTML += `
+      <div class="algo-item">
+        <div class="algo-name">${item.name}</div>
+        <div class="algo-value" style="color:${c}">${item.value ?? 'N/A'}</div>
+        <div class="algo-sub">${item.sub || ''}</div>
+      </div>`;
+  });
+
+  // Monte Carlo
+  renderMonteCarlo(algo, q.indicators?.current_price);
+
+  // Candlestick patterns
+  const pl = document.getElementById('patternList');
+  pl.innerHTML = '';
+  (algo.candlestick_patterns || []).forEach(p => {
+    pl.innerHTML += `<li>${p}</li>`;
+  });
+
+  // News
+  const nl = document.getElementById('newsList');
+  nl.innerHTML = '';
+  (q.news || []).forEach(n => {
+    nl.innerHTML += `
+      <li class="news-item">
+        <div class="news-title">${n.title}</div>
+        <div class="news-meta">${n.publisher} · ${n.published}</div>
+      </li>`;
+  });
+
+  // Fundamentals table
+  const ft = document.getElementById('fundTable');
+  const fRows = [
+    ['P/E Ratio', fundData.pe != null ? fundData.pe.toFixed(1) + 'x' : 'N/A'],
+    ['Forward P/E', fundData.forward_pe != null ? fundData.forward_pe.toFixed(1) + 'x' : 'N/A'],
+    ['Market Cap', formatMCap(fundData.market_cap)],
+    ['Analyst Target', fundData.target_price != null ? '$'+fundData.target_price.toFixed(2) : 'N/A'],
+    ['52W High', fundData['52w_high'] != null ? '$'+fundData['52w_high'].toFixed(2) : 'N/A'],
+    ['52W Low', fundData['52w_low'] != null ? '$'+fundData['52w_low'].toFixed(2) : 'N/A'],
+    ['Beta', fundData.beta != null ? fundData.beta.toFixed(2) : 'N/A'],
+    ['Short Ratio', fundData.short_ratio != null ? fundData.short_ratio.toFixed(1) + ' days' : 'N/A'],
+    ['Profit Margin', fundData.profit_margin != null ? (fundData.profit_margin*100).toFixed(1) + '%' : 'N/A'],
+    ['ROE', fundData.roe != null ? (fundData.roe*100).toFixed(1) + '%' : 'N/A'],
+    ['Rev Growth', fundData.revenue_growth != null ? (fundData.revenue_growth*100).toFixed(1) + '%' : 'N/A'],
+    ['Dividend', fundData.dividend != null ? (fundData.dividend*100).toFixed(2) + '%' : 'N/A'],
+  ];
+  ft.innerHTML = fRows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+
+function renderFullResult(r) {
+  // Update chart ticker label
+  document.getElementById('chartTicker').textContent = r.ticker;
+
+  // Verdict card
+  const pred = r.prediction || {};
+  const action = (pred.action || 'HOLD').toUpperCase();
+  const cls = action === 'BUY' ? 'buy' : action === 'SELL' ? 'sell' : 'hold';
+  const vc = document.getElementById('verdictCard');
+  vc.className = 'verdict-card ' + cls;
+  document.getElementById('verdictBadge').textContent = (action === 'BUY' ? '↑ ' : action === 'SELL' ? '↓ ' : '→ ') + action;
+  document.getElementById('verdictBadge').className = 'verdict-badge ' + cls;
+  document.getElementById('verdictCompany').textContent = r.company_name || r.ticker;
+  const price = r.current_price;
+  document.getElementById('verdictPrice').textContent = price != null ? '$' + price.toFixed(2) : '--';
+  const chg = r.indicators?.price_change_pct;
+  const chgEl = document.getElementById('verdictChange');
+  if (chg != null) {
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '% today';
+    chgEl.className = 'verdict-change ' + (chg >= 0 ? 'green' : 'red');
+  }
+  document.getElementById('predEntry').textContent = pred.entry_price || '--';
+  document.getElementById('predTarget').textContent = pred.target_price || '--';
+  document.getElementById('predStop').textContent = pred.stop_loss || '--';
+  document.getElementById('predUpside').textContent = pred.upside_pct != null ? '+' + pred.upside_pct + '%' : (pred.upside_pct || '--');
+  document.getElementById('predRR').textContent = pred.risk_reward || '--';
+  document.getElementById('predHorizon').textContent = (pred.time_horizon || '--').replace(/\s*\(.*\)/, '');
+  const cb = document.getElementById('convictionBadge');
+  cb.textContent = pred.conviction || '--';
+  cb.className = 'conviction-badge ' + (pred.conviction || 'MEDIUM');
+  document.getElementById('timeHorizon').textContent = pred.time_horizon || '--';
+  document.getElementById('verdictSummary').textContent = pred.summary || '';
+  document.getElementById('verdictLoading').style.display = 'none';
+  document.getElementById('verdictContent').style.display = 'block';
+
+  // Grounded analysis panel
+  renderGrounding(pred, r.ticker);
+  if (r.recommendation && !r.recommendation.error) renderRecommendation(r.recommendation);
+  showLabCards();
+
+  // Analysis texts
+  const agentMap = {
+    research: r.research,
+    fundamentals: r.fundamentals_analysis,
+    technical: r.technical_analysis,
+    risk: r.risk_analysis,
+    social: r.social_analysis,
+    algo: r.algo_analysis,
+  };
+  Object.entries(agentMap).forEach(([key, text]) => {
+    if (text) document.getElementById('text-' + key).textContent = text;
+  });
+
+  // Composite Verdict tab
+  renderVerdictTab(pred, r);
+
+  // Bull/Bear cases
+  document.getElementById('bullCase').textContent = pred.bull_case || '—';
+  document.getElementById('bearCase').textContent = pred.bear_case || '—';
+
+  // Catalysts
+  const cl = document.getElementById('catalystsList');
+  cl.innerHTML = '';
+  (pred.key_catalysts || []).forEach(c => {
+    cl.innerHTML += `<li><span class="catalyst-dot">◆</span>${c}</li>`;
+  });
+
+  // Reddit data
+  const rd = r.reddit || {};
+  document.getElementById('redditMentions').textContent = rd.mention_count || 0;
+  document.getElementById('redditSubs').textContent = (rd.subreddits || []).map(s => 'r/'+s).join(', ');
+  const rpl = document.getElementById('redditPosts');
+  rpl.innerHTML = '';
+  (rd.posts || []).slice(0, 5).forEach(p => {
+    rpl.innerHTML += `<li><span class="reddit-sub">r/${p.subreddit}</span> · ${p.title.slice(0, 80)}${p.title.length > 80 ? '...' : ''} <span class="muted">(▲${p.score})</span></li>`;
+  });
+
+  // StockTwits
+  const st = r.stocktwits || {};
+  const total = (st.bullish || 0) + (st.bearish || 0);
+  document.getElementById('stTotal').textContent = total + ' messages';
+  if (total > 0) {
+    const bPct = Math.round(st.bullish / total * 100);
+    document.getElementById('stBullPct').textContent = bPct + '% Bull';
+    document.getElementById('stBearPct').textContent = (100-bPct) + '% Bear';
+    document.getElementById('stBullBar').style.width = bPct + '%';
+    document.getElementById('stBearBar').style.width = (100-bPct) + '%';
+  }
+}
+
+function renderMonteCarlo(algo, currentPrice) {
+  if (!algo.mc_price_median || !currentPrice) return;
+  const mc = document.getElementById('mcChart');
+  const prices = [
+    {label:'5th %ile (bear)', price: algo.mc_price_5pct, pct: algo.mc_downside_pct, color:'var(--red)'},
+    {label:'25th %ile', price: algo.mc_price_25pct, pct: null, color:'#ff7043'},
+    {label:'Median (50th)', price: algo.mc_price_median, pct: algo.mc_expected_pct, color:'var(--yellow)'},
+    {label:'75th %ile', price: algo.mc_price_75pct, pct: null, color:'#66bb6a'},
+    {label:'95th %ile (bull)', price: algo.mc_price_95pct, pct: algo.mc_upside_pct, color:'var(--green)'},
+  ];
+  const maxP = algo.mc_price_95pct;
+  const minP = algo.mc_price_5pct;
+  const range = maxP - minP;
+  mc.innerHTML = prices.map(p => {
+    const barPct = range > 0 ? ((p.price - minP) / range * 80 + 10) : 50;
+    const pctText = p.pct != null ? ` (${p.pct > 0 ? '+' : ''}${p.pct}%)` : '';
+    return `<div class="mc-bar">
+      <div class="mc-label" style="color:${p.color};font-size:10px">${p.label}</div>
+      <div class="mc-track"><div class="mc-fill" style="width:${barPct}%;background:${p.color}"></div></div>
+      <div class="mc-price" style="color:${p.color}">$${p.price}${pctText}</div>
+    </div>`;
+  }).join('');
+  mc.innerHTML += `<div style="font-size:10px;color:var(--muted);margin-top:4px">Current: $${currentPrice?.toFixed(2)} · 30-day GBM simulation · 1,000 paths</div>`;
+}
+
+function drawSparkline(closes, ticker) {
+  const canvas = document.getElementById('sparkline-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth * window.devicePixelRatio || 800;
+  canvas.height = 140 * window.devicePixelRatio || 140;
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  const W = canvas.offsetWidth || 800;
+  const H = 140;
+  ctx.clearRect(0, 0, W, H);
+
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
+  const pad = 12;
+  const n = closes.length;
+
+  const x = i => pad + (i / (n-1)) * (W - 2*pad);
+  const y = v => H - pad - ((v - min) / range) * (H - 2*pad);
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  const lastClose = closes[closes.length-1];
+  const firstClose = closes[0];
+  const up = lastClose >= firstClose;
+  const color = up ? '#00e676' : '#ff1744';
+  grad.addColorStop(0, up ? 'rgba(0,230,118,0.3)' : 'rgba(255,23,68,0.3)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(closes[0]));
+  for (let i = 1; i < n; i++) ctx.lineTo(x(i), y(closes[i]));
+  ctx.lineTo(x(n-1), H);
+  ctx.lineTo(x(0), H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(closes[0]));
+  for (let i = 1; i < n; i++) ctx.lineTo(x(i), y(closes[i]));
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Current price dot
+  ctx.beginPath();
+  ctx.arc(x(n-1), y(lastClose), 5, 0, Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  // Labels
+  document.getElementById('chartLow').textContent = '$'+min.toFixed(2);
+  document.getElementById('chartHigh').textContent = '$'+max.toFixed(2);
+  document.getElementById('chartTicker').textContent = ticker || '';
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// Decision Brief v2 — a compact, deterministic action from all seven agents'
+// outputs (agents/decision_brief.py). Cached per-ticker so re-clicking the tab
+// doesn't re-fetch; the "I own this" toggle just re-highlights which of the two
+// already-computed guidance branches (if_owned / if_not_owned) is yours — no
+// second network round-trip needed for that.
+const DECISION_BRIEF_COLOR = {
+  BUY: 'var(--green)', ACCUMULATE: 'var(--green)',
+  HOLD: 'var(--yellow)', WATCH: 'var(--yellow)',
+  REDUCE: 'var(--red)', AVOID: 'var(--red)',
+};
+const DECISION_BRIEF_ARROW = {
+  BUY: '↑', ACCUMULATE: '↑', HOLD: '→', WATCH: '→', REDUCE: '↓', AVOID: '↓',
+};
+let _decisionBriefCache = {};
+let _lastAnalysisResult = null;
+
+async function renderVerdictTab(pred, r) {
+  _lastAnalysisResult = r;
+  await _fetchAndPaintDecisionBrief(r);
+}
+
+// Re-fetches using the CURRENT value of the cost-basis input. Called on initial
+// render and again whenever the user edits "My Avg Cost $" while this tab is the
+// one in view — this is the actual wiring for "seven-agent verdict + user position
+// context -> position-aware decision": the objective verdict alone never changes,
+// but combining it with the entry price can (e.g. HOLD -> REDUCE for profit-taking).
+async function _fetchAndPaintDecisionBrief(r) {
+  const el = document.getElementById('verdictTabContent');
+  const ticker = r.ticker;
+  const avgCostRaw = document.getElementById('costBasis').value;
+  const avgCost = parseFloat(avgCostRaw);
+  const hasPosition = avgCost > 0 && !isNaN(avgCost);
+  const cacheKey = ticker + '::' + (hasPosition ? avgCost.toFixed(4) : 'none');
+
+  const cached = _decisionBriefCache[cacheKey];
+  if (cached) { _paintDecisionBrief(cached); return; }
+
+  el.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--accent)">⏳ Building Decision Brief…</div>';
+  try {
+    const body = {ticker, recommendation: r.recommendation || null};
+    if (hasPosition) body.avg_cost = avgCost;
+    const resp = await fetch(API_BASE + '/api/decision-brief', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const brief = await resp.json();
+    if (brief.error) { el.innerHTML = `<div style="color:var(--red);padding:16px 0">${brief.error}</div>`; return; }
+    _decisionBriefCache[cacheKey] = brief;
+    _paintDecisionBrief(brief);
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);padding:16px 0">Failed to build Decision Brief: ${e}</div>`;
+  }
+}
+
+// Fires when the cost-basis input changes (blur/Enter, not every keystroke) —
+// if a Decision Brief is already on screen for this ticker, recompute it with
+// the new position context instead of leaving it stale.
+document.getElementById('costBasis').addEventListener('change', () => {
+  if (_lastAnalysisResult) _fetchAndPaintDecisionBrief(_lastAnalysisResult);
+});
+
+function _paintDecisionBrief(brief) {
+  const el = document.getElementById('verdictTabContent');
+
+  if (brief.final_action === 'INSUFFICIENT_EVIDENCE') {
+    el.innerHTML = `<div style="padding:16px;color:var(--yellow)">
+      ⚠ INSUFFICIENT_EVIDENCE — ${brief.one_line_verdict}
+      ${brief.missing_inputs ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">Missing: ${brief.missing_inputs.join(', ')}</div>` : ''}
+    </div>`;
+    return;
+  }
+
+  const col = DECISION_BRIEF_COLOR[brief.final_action] || 'var(--muted)';
+  const arrow = DECISION_BRIEF_ARROW[brief.final_action] || '';
+  const ap = brief.action_plan || {};
+  const ev = brief.evidence_status || {};
+  const trig = brief.triggers || {upgrade: [], downgrade: []};
+  const alt = brief.alternatives || {status: 'UNAVAILABLE', items: []};
+  const owned = brief.guidance.if_owned;
+  const notOwned = brief.guidance.if_not_owned;
+  const pc = brief.position_context;
+
+  const maxExposureTxt = ap.max_exposure_pct != null
+    ? `${ap.max_exposure_pct}%` : (ap.max_exposure_note || '—');
+
+  // Position-aware banner: only shown when the user has entered a cost basis.
+  // Makes the objective-vs-position-aware distinction explicit — this is the
+  // "seven-agent verdict + user position -> position-aware decision" pipeline.
+  let positionHtml = '';
+  if (pc) {
+    const plColor = pc.unrealized_pl_pct >= 0 ? 'var(--green)' : 'var(--red)';
+    const overridden = brief.objective_action && brief.objective_action !== brief.final_action;
+    positionHtml = `
+    <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;border:1px solid ${plColor};margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📍 Position-Aware (your entry: $${pc.avg_cost.toFixed(2)})</div>
+        <div style="font-size:13px;font-weight:800;color:${plColor}">${pc.unrealized_pl_pct>=0?'+':''}${pc.unrealized_pl_pct.toFixed(1)}%${pc.unrealized_pl_dollar!=null?` (${pc.unrealized_pl_dollar>=0?'+':''}$${pc.unrealized_pl_dollar.toFixed(2)})`:''}</div>
+      </div>
+      ${overridden ? `<div style="font-size:11px;color:var(--yellow);margin-bottom:4px">⚠ Objective signal alone would be <b>${brief.objective_action}</b> — your position changes the call.</div>` : ''}
+      <div style="font-size:12px;color:var(--text);line-height:1.5">${owned.position_note || ''}</div>
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <!-- 1. Action + one-line verdict -->
+    <div style="display:flex;align-items:center;gap:16px;padding:14px 16px;background:var(--bg3);border-radius:10px;border:2px solid ${col};margin-bottom:12px;flex-wrap:wrap">
+      <div style="font-size:30px;font-weight:900;color:${col};white-space:nowrap">${arrow} ${brief.final_action}</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5;flex:1;min-width:200px">${brief.one_line_verdict}</div>
+    </div>
+
+    ${positionHtml}
+
+    <!-- 2. What the user should do -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;border-left:3px solid ${DECISION_BRIEF_COLOR[owned.action]||'var(--muted)'}">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">If Owned</div>
+        <div style="font-size:13px;font-weight:800;color:${DECISION_BRIEF_COLOR[owned.action]||'var(--text)'}">${owned.action}</div>
+        <div style="font-size:12px;color:var(--text);margin-top:2px">${owned.instruction}</div>
+      </div>
+      <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;border-left:3px solid ${DECISION_BRIEF_COLOR[notOwned.action]||'var(--muted)'}">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">If Not Owned</div>
+        <div style="font-size:13px;font-weight:800;color:${DECISION_BRIEF_COLOR[notOwned.action]||'var(--text)'}">${notOwned.action}</div>
+        <div style="font-size:12px;color:var(--text);margin-top:2px">${notOwned.instruction}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;padding:8px 12px;background:var(--bg3);border-radius:8px;margin-bottom:12px;font-size:11px">
+      ${ap.entry_low != null ? `<div><span style="color:var(--muted)">Entry</span> <b style="color:var(--text)">$${ap.entry_low.toFixed(2)}–$${ap.entry_high.toFixed(2)}</b></div>` : ''}
+      <div><span style="color:var(--muted)">Horizon</span> <b style="color:var(--text)">${ap.time_horizon_days || '—'}d</b></div>
+      <div><span style="color:var(--muted)">Review</span> <b style="color:var(--text)">${ap.review_note || '—'}</b></div>
+      <div><span style="color:var(--muted)">Max exposure</span> <b style="color:var(--text)">${maxExposureTxt}</b></div>
+    </div>
+
+    <!-- 3. Three decisive insights -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Decisive Insights</div>
+      ${(brief.decisive_insights||[]).map(i => `<div style="font-size:12px;color:var(--text);line-height:1.5;padding:3px 0">• ${i}</div>`).join('')}
+    </div>
+
+    <!-- 4. Upgrade / downgrade triggers -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div>
+        <div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Upgrade If</div>
+        ${(trig.upgrade||[]).map(t => `<div style="font-size:11px;color:var(--text);padding:2px 0">↑ ${t}</div>`).join('')}
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Downgrade If</div>
+        ${(trig.downgrade||[]).map(t => `<div style="font-size:11px;color:var(--text);padding:2px 0">↓ ${t}</div>`).join('')}
+      </div>
+    </div>
+
+    <!-- 5. Evidence-quality strip -->
+    <div style="display:flex;flex-wrap:wrap;gap:14px;padding:8px 12px;background:var(--bg3);border-radius:8px;margin-bottom:10px;font-size:11px">
+      <div><span style="color:var(--muted)">Thesis</span> <b style="color:var(--text)">${ev.thesis_confidence||'—'}</b></div>
+      <div><span style="color:var(--muted)">Data</span> <b style="color:var(--text)">${ev.data_confidence||'—'}</b></div>
+      <div><span style="color:var(--muted)">Stat. edge</span> <b style="color:var(--text)">${ev.statistical_edge||'—'}</b></div>
+      <div><span style="color:var(--muted)">Rank</span> <b style="color:var(--text)">${ev.cross_sectional_rank||'—'}</b></div>
+      <div><span style="color:var(--muted)">Calibration</span> <b style="color:var(--text)">${ev.calibration_maturity||'—'}</b></div>
+    </div>
+
+    ${alt.status === 'OK' ? `<div style="font-size:11px;color:var(--muted);margin-bottom:10px">
+      Better-ranked alternatives: ${alt.items.map(i=>`<b style="color:var(--accent)">${i.ticker}</b> (#${i.rank})`).join(', ')}
+    </div>` : ''}
+
+    <!-- 6. Expandable detailed agent analysis (already the sibling tabs above) -->
+    <div style="font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px">
+      Full per-agent narratives (Research · Fundamentals · Technical · Risk · Social · Algo) are in the tabs above — this brief is the synthesis, not a repeat of them.
+      ${brief.warnings && brief.warnings.length ? ` <span style="color:var(--yellow)">⚠ ${brief.warnings.length} honesty warning(s).</span>` : ''}
+    </div>`;
+}
+
+function formatMCap(v) {
+  if (!v) return 'N/A';
+  if (v >= 1e12) return '$' + (v/1e12).toFixed(2) + 'T';
+  if (v >= 1e9)  return '$' + (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6)  return '$' + (v/1e6).toFixed(2) + 'M';
+  return '$' + v;
+}
+
+// ── 7-Pillar Investing Recommendation card ─────────────────────────────────
+// Renders agents/recommendation.py output. Every number shown is computed
+// (P4); the honesty strip shows the data-quality flags literally rather than
+// hiding them. Non-backtestable pillars are dimmed + tagged "tracked forward".
+const REC_VERB_CLS = { BUY:'buy', ACCUMULATE:'buy', HOLD:'hold', REDUCE:'sell', SELL:'sell' };
+const REC_VERB_COLOR = { buy:'var(--green)', hold:'var(--yellow)', sell:'var(--red)' };
+
+function renderRecommendation(rec) {
+  const card = document.getElementById('recCard');
+  const body = document.getElementById('recBody');
+  card.style.display = 'block';
+
+  const cls = REC_VERB_CLS[rec.action] || 'hold';
+  const col = REC_VERB_COLOR[cls];
+  const f2 = v => v != null ? Number(v).toFixed(2) : '—';
+
+  // Pillar bars: backtested pillars full-strength; tracked-forward dimmed.
+  const pillarOrder = ['technical','algo','risk','fundamentals','research','social'];
+  const bars = pillarOrder.map(name => {
+    const p = rec.pillars[name] || {};
+    const s = p.score != null ? p.score : 50;
+    const dim = p.backtestable ? '' : 'opacity:.55;';
+    const tag = p.backtestable ? '' :
+      '<span style="font-size:9px;color:var(--muted)"> tracked fwd</span>';
+    const barCol = s >= 60 ? 'var(--green)' : s <= 40 ? 'var(--red)' : 'var(--yellow)';
+    return `<div style="${dim}margin-bottom:7px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+        <span style="color:var(--muted);text-transform:capitalize">${name}${tag}</span>
+        <span style="font-weight:700">${s}</span></div>
+      <div style="background:var(--bg3);border-radius:4px;height:7px;overflow:hidden">
+        <div style="width:${s}%;height:100%;background:${barCol};border-radius:4px"></div></div>
+    </div>`;
+  }).join('');
+
+  const bt = rec.backtest || {};
+  const flags = rec.honesty_flags || {};
+  const dsrOk = (bt.dsr || 0) >= 0.5;
+  const veto = rec.risk_veto ? '<span style="color:var(--red);font-weight:700"> · RISK VETO ACTIVE</span>' : '';
+
+  // Four separate calibrated confidence dimensions (never one blended badge).
+  const cf = rec.confidence || {};
+  const cfColor = lvl => lvl === 'HIGH' ? 'var(--green)' : (lvl === 'MEDIUM' || lvl === 'LOW') ? 'var(--yellow)' : 'var(--red)';
+  const cfRow = (label, dim, hint) => {
+    const c = cf[dim] || {level:'—'};
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0" title="${(c.basis||'').replace(/"/g,'')}">
+      <span style="color:var(--muted);font-size:11px">${label}</span>
+      <span style="font-weight:800;font-size:11px;color:${cfColor(c.level)}">${c.level}</span></div>`;
+  };
+  const sizeLabel = rec.position_size_gated
+    ? `<span style="color:var(--red)">0% — gated (no proven edge)</span>`
+    : `${f2(rec.position_size_pct)}%`;
+
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:230px 1fr 1fr;gap:18px">
+      <div style="border-right:1px solid var(--border);padding-right:14px">
+        <div style="text-align:center">
+          <div style="font-size:26px;font-weight:900;color:${col}">${rec.action}</div>
+          <div style="font-size:38px;font-weight:900;margin:2px 0">${rec.composite}</div>
+          <div style="font-size:11px;color:var(--muted)">composite / 100${veto}</div>
+        </div>
+        <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Confidence — four dimensions</div>
+          ${cfRow('📖 Thesis (narrative)', 'thesis')}
+          ${cfRow('🗂️ Data quality', 'data')}
+          ${cfRow('📈 Statistical edge', 'statistical_edge')}
+          ${cfRow('⚖️ Allocation', 'allocation')}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">
+          horizon ~${rec.time_horizon_days}d · size ${sizeLabel}</div>
+      </div>
+      <div>${bars}</div>
+      <div style="font-size:12px">
+        <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--muted)">Entry zone</span>
+          <span style="font-weight:700">$${f2(rec.levels.entry_zone_low)} – $${f2(rec.levels.entry_zone_high)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--muted)">Target (2:1 R:R)</span>
+          <span style="font-weight:700;color:var(--green)">$${f2(rec.levels.target_price)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--muted)">Stop (2×ATR)</span>
+          <span style="font-weight:700;color:var(--red)">$${f2(rec.levels.stop_loss)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--muted)">Core backtest dSR</span>
+          <span style="font-weight:700;color:${dsrOk?'var(--green)':'var(--red)'}">${f2(bt.dsr)}
+            <span style="color:var(--muted);font-weight:400" title="deflated against the fixed pre-registered variant count — does not change when you run more backtests">(n=${bt.n_trials} fixed)</span></span></div>
+        ${(() => { const e = (cf.statistical_edge||{}).checks || {}; const chk = (k,lbl) => `<span style="color:${e[k]&&e[k].pass?'var(--green)':'var(--red)'}">${e[k]&&e[k].pass?'✓':'✗'} ${lbl}</span>`;
+          return `<div style="padding:3px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--muted)">Edge gate</span>
+            <div style="font-size:10px;margin-top:2px;display:flex;flex-wrap:wrap;gap:8px">
+              ${chk('walk_forward','walk-fwd')} ${chk('embargo','embargo')} ${chk('pbo','PBO')} ${chk('net_cost_positive','net-cost')} ${chk('min_sample','sample')} ${chk('dsr','dSR')}</div></div>`; })()}
+        <div style="display:flex;justify-content:space-between;padding:3px 0">
+          <span style="color:var(--muted)">Cost drag</span>
+          <span style="font-weight:700">${f2(bt.total_cost_pct)}%</span></div>
+        <div style="margin-top:8px;font-size:10px;line-height:1.7">
+          <span style="background:rgba(0,230,118,.12);color:var(--green);padding:1px 7px;border-radius:5px">cost: ${flags.cost_model||'—'}</span>
+          <span style="background:rgba(255,23,68,.12);color:var(--red);padding:1px 7px;border-radius:5px">survivorship ✗</span>
+          <span style="background:rgba(${flags.fundamentals_source==='sec-edgar'?'0,230,118':'255,23,68'},.12);color:${flags.fundamentals_source==='sec-edgar'?'var(--green)':'var(--red)'};padding:1px 7px;border-radius:5px" title="fundamentals pillar source">fundamentals: ${flags.fundamentals_source==='sec-edgar'?'SEC ✓':'n/a ✗'}</span>
+          <span style="background:rgba(0,212,255,.12);color:var(--accent);padding:1px 7px;border-radius:5px" title="the recommendation does not change if you run more backtests">reproducible ✓</span>
+          <span style="background:rgba(255,234,0,.1);color:var(--yellow);padding:1px 7px;border-radius:5px">backtest = core only</span>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
+      ${rec.disclaimer || ''}</div>`;
+}
+
+function quickRecStandalone() {
+  // Keyless entry point from the search bar: reveal the dashboard shell so
+  // the recommendation card has somewhere to live, then run the computed rec.
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) {
+    // Empty ticker while the portfolio is open almost always means "give me the
+    // keyless read on my holdings" — route to the portfolio path instead of a
+    // dead-end alert (mirrors the Analyze Stock behavior).
+    const pfOpen = document.getElementById('portfolioCard').style.display !== 'none';
+    if (pfOpen && loadPortfolio().length) {
+      if (confirm('No ticker entered. Get keyless signals for your whole portfolio instead?')) {
+        buildPortfolioBrief();
+      }
+      return;
+    }
+    alert('Enter a ticker for Quick Rec (or open “My Portfolio” for keyless portfolio signals).');
+    return;
+  }
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  showLabCards();
+  quickRec();
+}
+
+// ── Backtest Lab + Data Sources ────────────────────────────────────────────
+// Both fully keyless (computed paths). The Lab races the strategy library net
+// of realistic costs, with each dSR deflated against the TRUE trial count —
+// the numbers here are the same honest ones the CLI and /fil produce.
+let _labStrategiesLoaded = false;
+
+function toggleAdvanced() {
+  const body = document.getElementById('advancedBody');
+  const label = document.getElementById('advancedToggleLabel');
+  const showing = body.style.display !== 'none';
+  body.style.display = showing ? 'none' : 'block';
+  label.textContent = showing ? '▸ Show' : '▾ Hide';
+  if (!showing) body.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function showLabCards() {
+  // Reveal the collapsed wrapper (still collapsed) and kick off the cheap
+  // background fetches (universes, strategy list, prediction ledger) so the
+  // section is instantly populated the moment the user chooses to expand it.
+  document.getElementById('advancedSection').style.display = 'block';
+  document.getElementById('btLabCard').style.display = 'block';
+  document.getElementById('dataSrcCard').style.display = 'block';
+  document.getElementById('xsecCard').style.display = 'block';
+  document.getElementById('predLedgerCard').style.display = 'block';
+  document.getElementById('decisionCard').style.display = 'block';
+  loadUniverses();
+  loadPredictionLedger();
+  if (!_labStrategiesLoaded) {
+    _labStrategiesLoaded = true;
+    fetch('/api/strategies').then(r => r.json()).then(d => {
+      document.getElementById('btStrategy').innerHTML =
+        (d.strategies || []).map(s => `<option value="${s}">${s}</option>`).join('');
+    }).catch(() => {});
+    loadDataSources();
+  }
+}
+
+// ── Cross-Sectional Ranking ───────────────────────────────────────────────
+// Survivorship-safe, point-in-time. All numbers are computed server-side
+// (charter P4: no LLM produces or alters a rank); the card only renders them.
+let _universesLoaded = false;
+async function loadUniverses() {
+  if (_universesLoaded) return;
+  try {
+    const d = await (await fetch('/api/universes')).json();
+    const sel = document.getElementById('xsecUniverse');
+    sel.innerHTML = (d.universes || []).map(u =>
+      `<option value="${u.universe_id}">${u.universe_id}${u.survivorship_safe ? '' : ' ⚠'}</option>`).join('');
+    _universesLoaded = true;
+  } catch (e) { /* leave placeholder */ }
+}
+
+function _xsecLabel(k, v) {
+  const good = {PIT_SAFE:1, SURVIVORSHIP_SAFE:1};
+  const on = (v === true || v === 'YES' || v === 'INCLUDED');
+  const col = (k in good) ? (on ? 'var(--green)' : 'var(--red)')
+            : (on ? 'var(--green)' : 'var(--muted)');
+  return `<span style="display:inline-block;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:2px 7px;margin:2px;font-size:10px;color:${col}">${k}: <b>${v}</b></span>`;
+}
+
+async function runRanking() {
+  const btn = document.getElementById('xsecRunBtn');
+  const body = document.getElementById('xsecBody');
+  btn.disabled = true; btn.textContent = 'ranking…';
+  try {
+    const r = await (await fetch('/api/rankings/run', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({as_of: document.getElementById('xsecAsOf').value,
+                            universe_id: document.getElementById('xsecUniverse').value})})).json();
+    if (r.error) { body.innerHTML = `<div style="color:var(--red);padding:10px">${r.error}</div>`; return; }
+    renderRanking(r);
+  } catch (e) { body.innerHTML = `<div style="color:var(--red);padding:10px">${e}</div>`; }
+  finally { btn.disabled = false; btn.textContent = 'Rank as-of'; }
+}
+
+function renderRanking(r) {
+  // Guard: the engine returns a status other than OK when it cannot rank
+  // (e.g. UNIVERSE_INCOMPLETE when as-of is outside the fixture's coverage).
+  // Without this, the code below reads missing fields and prints "undefined".
+  if (r.error || (r.status && r.status !== 'OK')) {
+    const reason = r.reason || r.error || 'Ranking unavailable.';
+    document.getElementById('xsecBody').innerHTML = `
+      <div style="padding:16px;border:1px solid var(--yellow);border-radius:8px;background:rgba(255,234,0,.06)">
+        <div style="font-size:12px;font-weight:800;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">
+          ⚠ ${r.status || 'ERROR'}</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.5">${reason}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">
+          Pick an as-of date inside the universe's coverage window and try again.
+          The <b>reference-smallcap-demo</b> fixture covers <b>2019-01-02 → 2025-01-01</b> (synthetic data, mechanics only).</div>
+      </div>`;
+    return;
+  }
+  const lab = r.labels || {};
+  const labels = Object.keys(lab).map(k => _xsecLabel(k, lab[k])).join('');
+  const pct = v => (v == null ? '—' : (v * 100).toFixed(0));
+  const rows = (r.ranked || []).map(x => {
+    const dl = x.status === 'DELISTED_BUT_VALID_HISTORICALLY' || x.listing_status === 'delisted';
+    const risk = x.risk_veto ? ' 🛑' : '';
+    const f = x.factor_scores || {};
+    return `<tr style="border-top:1px solid var(--border)${dl ? ';opacity:.6' : ''}">
+      <td style="padding:4px 8px;font-weight:800">${x.rank}</td>
+      <td style="padding:4px 8px"><b>${x.ticker_as_of || x.security_id}</b>${risk}<br>
+        <span style="font-size:9px;color:var(--muted)">${x.security_id} · ${x.sector || '—'}</span></td>
+      <td style="padding:4px 8px;text-align:right;font-weight:800;color:var(--accent)">${(x.composite_raw*100).toFixed(1)}</td>
+      <td style="padding:4px 8px;text-align:right">${pct(f.quality)}</td>
+      <td style="padding:4px 8px;text-align:right">${pct(f.momentum)}</td>
+      <td style="padding:4px 8px;text-align:right">${pct(f.valuation)}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--red)">${pct(x.risk_score)}</td>
+      <td style="padding:4px 8px;font-size:10px;color:var(--muted)">${x.data_confidence!=null?(x.data_confidence*100).toFixed(0)+'%':''} ${x.status||''}</td></tr>`;
+  }).join('');
+  document.getElementById('xsecBody').innerHTML = `
+    <div style="margin-bottom:8px">${labels}</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">
+      as-of <b style="color:var(--text)">${r.as_of}</b> · ${r.n_ranked} securities ·
+      config <b>${r.config_version}</b> (hash ${(r.config_hash||'').slice(0,8)}) ·
+      fingerprint <b>${(r.decision_fingerprint||'').slice(0,8)}</b>
+      ${r.ranking_run_id ? ' · frozen ✓' : ''}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr style="color:var(--muted);text-align:left">
+        <th style="padding:4px 8px">#</th><th style="padding:4px 8px">Security</th>
+        <th style="padding:4px 8px;text-align:right">Score</th><th style="padding:4px 8px;text-align:right">Qual</th>
+        <th style="padding:4px 8px;text-align:right">Mom</th><th style="padding:4px 8px;text-align:right">Val</th>
+        <th style="padding:4px 8px;text-align:right">Risk</th><th style="padding:4px 8px">Data</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+      🛑 = risk-veto (conviction capped). Dimmed rows are delisted-but-historically-valid (kept, never dropped).
+      ${lab.SURVIVORSHIP_SAFE === true ? '' : '⚠ Production survivorship safety BLOCKED — reference universe is synthetic (labelled), proving mechanics only.'}</div>`;
+}
+
+async function evalRankings() {
+  const btn = document.getElementById('xsecEvalBtn');
+  const body = document.getElementById('xsecBody');
+  btn.disabled = true; btn.textContent = 'evaluating…';
+  try {
+    const uni = document.getElementById('xsecUniverse').value;
+    const r = await (await fetch('/api/rankings/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({start:'2019-06-01', end:'2024-01-01', cadence:'M', horizon:20,
+                            cost_bps:10, universe_id: uni})})).json();
+    if (r.error || r.status !== 'OK') { body.innerHTML =
+      `<div style="color:var(--muted);padding:10px">${r.error || r.status || 'no data'}</div>`; return; }
+    body.innerHTML = `
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Delisting-inclusive historical evaluation
+        · horizon <b>${r.horizon}d</b> · ${r.dates_evaluated} ranking dates · costs ${r.cost_bps}bps/leg</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+        ${_metric('Mean rank IC', r.mean_rank_ic)}
+        ${_metric('IC info ratio', r.ic_information_ratio)}
+        ${_metric('L/S net mean %', r.long_short_net_mean_pct)}
+        ${_metric('L/S ann. Sharpe', r.long_short_net_annualized_sharpe)}
+        ${_metric('Deflated Sharpe', r.deflated_sharpe)}
+        ${_metric('Avg turnover', r.avg_turnover)}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+        ${r.n_trials_basis}. ${r.delisting}. ${r.cost_note}.
+        On synthetic reference prices IC≈0 is expected and honest — no real edge exists in random fixtures.</div>`;
+  } catch (e) { body.innerHTML = `<div style="color:var(--red);padding:10px">${e}</div>`; }
+  finally { btn.disabled = false; btn.textContent = 'Evaluate history'; }
+}
+function _metric(label, val) {
+  return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div>
+    <div style="font-size:18px;font-weight:800;color:var(--accent)">${val==null?'—':val}</div></div>`;
+}
+
+// ── Prediction Ledger & Calibration ───────────────────────────────────────
+async function refreshOutcomes() {
+  const btn = document.getElementById('refreshOutcomesBtn');
+  btn.disabled = true; btn.textContent = '↻ refreshing…';
+  try {
+    const t = document.getElementById('ticker').value.trim().toUpperCase();
+    await fetch('/api/predictions/refresh', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(t ? {ticker:t} : {})});
+    await loadPredictionLedger();
+  } catch (e) { /* leave prior view */ }
+  finally { btn.disabled = false; btn.textContent = '↻ Refresh outcomes'; }
+}
+
+async function startReplay() {
+  const btn = document.getElementById('rpBtn');
+  const prog = document.getElementById('rpProgress');
+  btn.disabled = true; prog.textContent = 'starting…';
+  try {
+    const body = {tickers: document.getElementById('rpTickers').value,
+                  start: document.getElementById('rpStart').value,
+                  end: document.getElementById('rpEnd').value,
+                  cadence: document.getElementById('rpCadence').value};
+    const r = await (await fetch('/api/replay', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)})).json();
+    if (r.error) { prog.textContent = r.error; btn.disabled = false; return; }
+    document.getElementById('calSource').value = 'replay';
+    pollReplay(r.run_id);
+  } catch (e) { prog.textContent = '' + e; btn.disabled = false; }
+}
+
+async function pollReplay(runId) {
+  const prog = document.getElementById('rpProgress');
+  const btn = document.getElementById('rpBtn');
+  try {
+    const run = await (await fetch('/api/replay/' + runId)).json();
+    const st = run.items_by_status || {};
+    prog.textContent = `${run.status} · ${run.done_items}/${run.total_items} (${run.pct}%)`
+      + (st.skipped ? ` · ${st.skipped} skipped` : '') + (st.error ? ` · ${st.error} err` : '');
+    if (run.status === 'running') {
+      setTimeout(() => pollReplay(runId), 2000);
+    } else {
+      btn.disabled = false;
+      prog.textContent = `done · ${run.done_items}/${run.total_items} frozen`;
+      loadPredictionLedger();          // refresh the historical calibration view
+    }
+  } catch (e) { prog.textContent = '' + e; btn.disabled = false; }
+}
+
+async function loadPredictionLedger() {
+  const body = document.getElementById('predLedgerBody');
+  const horizon = document.getElementById('calHorizon').value;
+  const source = (document.getElementById('calSource') || {}).value || 'all';
+  try {
+    const [preds, cal] = await Promise.all([
+      (await fetch('/api/predictions')).json(),
+      (await fetch('/api/calibration?horizon=' + horizon + '&source=' + source)).json(),
+    ]);
+    const s = cal.summary || preds.summary || {};
+    const o = cal.overall || {};
+    const pct = v => (v === null || v === undefined) ? '—' : Number(v).toFixed(1) + '%';
+    const num = v => (v === null || v === undefined) ? '—' : Number(v).toFixed(3);
+
+    // Header stat tiles.
+    const tile = (label, val, col) => `<div style="text-align:center;padding:6px 10px">
+      <div style="font-size:22px;font-weight:900;${col?('color:'+col):''}">${val}</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div></div>`;
+    const winRate = o.win_rate === null || o.win_rate === undefined ? '—' : (o.win_rate*100).toFixed(0)+'%';
+    let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-around;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10px">
+      ${tile('Predictions', s.total_predictions ?? 0)}
+      ${tile('Active', s.active_not_fully_matured ?? 0, 'var(--yellow)')}
+      ${tile('Matured (20d)', s.matured_20d ?? 0, 'var(--accent)')}
+      ${tile('Win rate @'+horizon+'d', winRate, (o.win_rate>=0.5)?'var(--green)':'var(--red)')}
+      ${tile('Avg excess', pct(o.avg_excess_return_pct), (o.avg_excess_return_pct>=0)?'var(--green)':'var(--red)')}
+      ${tile('Brier', num(o.brier))}
+      ${tile('Calib. error', num(cal.calibration_error_ece))}
+    </div>`;
+
+    if (!o.n) {
+      html += `<div style="color:var(--muted);text-align:center;padding:10px 0;font-size:12px">
+        No matured outcomes yet at ${horizon}d. Freeze predictions (run a Quick Rec), let time pass,
+        then “Refresh outcomes”. ${(preds.predictions||[]).length} prediction(s) frozen so far.</div>`;
+      body.innerHTML = html;
+      return;
+    }
+
+    // Confidence reliability — does HIGH confidence actually win more?
+    const rel = cal.confidence_reliability || [];
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Confidence reliability (statistical edge)</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <tr><th style="text-align:left;color:var(--muted);font-size:10px">level</th><th style="text-align:right;color:var(--muted);font-size:10px">n</th>
+        <th style="text-align:right;color:var(--muted);font-size:10px">predicted</th><th style="text-align:right;color:var(--muted);font-size:10px">realized</th><th style="text-align:right;color:var(--muted);font-size:10px">gap</th></tr>
+        ${rel.map(r => `<tr style="border-top:1px solid var(--border)">
+          <td>${r.level}</td><td style="text-align:right">${r.n}</td>
+          <td style="text-align:right">${(r.predicted_win_prob*100).toFixed(0)}%</td>
+          <td style="text-align:right;font-weight:700;color:${r.realized_win_rate>=0.5?'var(--green)':'var(--red)'}">${(r.realized_win_rate*100).toFixed(0)}%</td>
+          <td style="text-align:right;color:${r.calibration_gap<=0.15?'var(--green)':'var(--yellow)'}">${(r.calibration_gap*100).toFixed(0)}%</td></tr>`).join('')}
+      </table></div>`;
+
+    // Agent (pillar) attribution — win rate when each pillar was leaning (>=60).
+    const pa = cal.pillar_attribution || {};
+    html += `<div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Agent attribution — outcome when pillar ≥ 60</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <tr><th style="text-align:left;color:var(--muted);font-size:10px">pillar</th><th style="text-align:right;color:var(--muted);font-size:10px">n</th>
+        <th style="text-align:right;color:var(--muted);font-size:10px">win rate</th><th style="text-align:right;color:var(--muted);font-size:10px">avg excess</th></tr>
+        ${Object.entries(pa).map(([name,st]) => `<tr style="border-top:1px solid var(--border)">
+          <td style="text-transform:capitalize">${name}</td><td style="text-align:right">${st.n||0}</td>
+          <td style="text-align:right;font-weight:700;color:${(st.win_rate>=0.5)?'var(--green)':'var(--red)'}">${st.win_rate===null||st.win_rate===undefined?'—':(st.win_rate*100).toFixed(0)+'%'}</td>
+          <td style="text-align:right">${pct(st.avg_excess_return_pct)}</td></tr>`).join('')}
+      </table></div></div>`;
+
+    // Recent frozen predictions with their outcomes.
+    const rows = (preds.predictions||[]).slice(0,8).map(p => {
+      const oc = (p.outcomes||{})[horizon] || {};
+      const dir = oc.direction_correct;
+      const badge = dir===1?'<span style="color:var(--green)">✓ win</span>':dir===0?'<span style="color:var(--red)">✗ loss</span>':'<span style="color:var(--muted)">pending</span>';
+      return `<tr style="border-top:1px solid var(--border);font-size:12px">
+        <td style="padding:3px 6px">${p.ticker}</td><td style="padding:3px 6px">${p.action}</td>
+        <td style="padding:3px 6px;color:var(--muted)">${(p.created_at||'').slice(0,10)}</td>
+        <td style="padding:3px 6px">${p.confidence.statistical_edge||'—'}</td>
+        <td style="padding:3px 6px;text-align:right">${oc.raw_return_pct!==undefined&&oc.raw_return_pct!==null?pct(oc.raw_return_pct):'—'}</td>
+        <td style="padding:3px 6px;text-align:right">${badge}</td>
+        <td style="padding:3px 6px;color:var(--muted);font-family:ui-monospace,monospace;font-size:10px" title="strategy version / decision fingerprint">${(p.strategy_version||'').slice(0,8)}·${(p.decision_fingerprint||'').slice(0,8)}</td></tr>`;
+    }).join('');
+    html += `<div style="margin-top:10px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Recent frozen predictions (@${horizon}d outcome)</div>
+      <table style="width:100%;border-collapse:collapse">
+        <tr><th style="text-align:left;color:var(--muted);font-size:10px;padding:3px 6px">ticker</th><th style="text-align:left;color:var(--muted);font-size:10px;padding:3px 6px">action</th>
+        <th style="text-align:left;color:var(--muted);font-size:10px;padding:3px 6px">frozen</th><th style="text-align:left;color:var(--muted);font-size:10px;padding:3px 6px">edge</th>
+        <th style="text-align:right;color:var(--muted);font-size:10px;padding:3px 6px">return</th><th style="text-align:right;color:var(--muted);font-size:10px;padding:3px 6px">result</th>
+        <th style="text-align:left;color:var(--muted);font-size:10px;padding:3px 6px">version·fp</th></tr>${rows}</table></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">
+        Immutable & auditable: each prediction is frozen at creation with its strategy version and decision
+        fingerprint; outcomes are pure price arithmetic (benchmark-relative vs SPY), never edited.
+        Measurement only — outcomes never tune the strategies or change the gates.</div>`;
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${e}</div>`;
+  }
+}
+
+async function loadDataSources() {
+  try {
+    const d = await (await fetch('/api/datasources')).json();
+    const rows = (d.providers || []).map(p => {
+      const dot = p.configured ? 'var(--green)' : 'var(--yellow)';
+      const pit = (p.pit_capable || []).length ? '<span style="color:var(--green)">PIT</span>' : '<span style="color:var(--muted)">snapshot</span>';
+      return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span><span style="color:${dot}">●</span> <b>${p.id}</b>
+          <span style="color:var(--muted)"> ${(p.kinds||[]).join(', ')}</span></span>
+        <span style="color:var(--muted)">${pit} · ${p.cost || ''} · ${p.status}</span></div>`;
+    }).join('');
+    document.getElementById('dataSrcBody').innerHTML = rows +
+      `<div style="font-size:10px;color:var(--muted);margin-top:8px">
+        ${d.n_active}/${(d.providers||[]).length} active. Key-gated sources activate automatically when their free key is added to stock_agent/.env
+        (see .env.example). "snapshot" = current-view data, honestly not point-in-time.</div>`;
+    const m = await (await fetch('/api/macro')).json();
+    if (m.series) {
+      const parts = [];
+      if (m.series.DGS10)  parts.push(`10Y ${m.series.DGS10.value}%`);
+      if (m.series.T10Y2Y) parts.push(`10Y-2Y ${m.series.T10Y2Y.value}%`);
+      if (m.series.UNRATE) parts.push(`UNEMP ${m.series.UNRATE.value}%`);
+      if (m.series.VIXCLS) parts.push(`VIX ${m.series.VIXCLS.value}`);
+      document.getElementById('macroStrip').textContent =
+        parts.join('  ·  ') + '  (FRED/CBOE, live)';
+    }
+  } catch (e) { /* the card degrades to empty, never breaks the page */ }
+}
+
+function _btMetricRow(label, value, color) {
+  return `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+    <span style="color:var(--muted)">${label}</span><span style="font-weight:700;${color?('color:'+color):''}">${value}</span></div>`;
+}
+
+async function runOneBacktest() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) { alert('Enter a ticker first'); return; }
+  const body = document.getElementById('btLabBody');
+  const btn = document.getElementById('btOneBtn');
+  btn.disabled = true;
+  body.innerHTML = '<div style="color:var(--accent);text-align:center;padding:14px 0;font-size:13px">Backtesting…</div>';
+  try {
+    const d = await (await fetch('/api/backtest', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker, strategy: document.getElementById('btStrategy').value,
+                            period: document.getElementById('btPeriod').value,
+                            realistic_costs: document.getElementById('btCosts').checked})})).json();
+    if (d.error) { body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${d.error}</div>`; return; }
+    const dsrOk = d.dsr >= 0.5;
+    body.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;font-size:12px">
+      <div>
+        ${_btMetricRow('Strategy', d.strategy + ' on ' + d.ticker + ' (' + d.period + ')')}
+        ${_btMetricRow('Sharpe', d.sharpe)}
+        ${_btMetricRow('Deflated Sharpe (dSR)', d.dsr + ' <span style="color:var(--muted);font-weight:400">(n=' + d.n_trials + ' trials)</span>', dsrOk ? 'var(--green)' : 'var(--red)')}
+        ${_btMetricRow('Max drawdown', (d.max_dd*100).toFixed(1) + '%')}
+        ${_btMetricRow('Win rate', (d.win_rate*100).toFixed(1) + '%')}
+      </div>
+      <div>
+        ${_btMetricRow('Trades / cost drag', d.n_trades + ' / ' + d.total_cost_pct + '%')}
+        ${_btMetricRow('Cost model', d.cost_model)}
+        ${_btMetricRow('Current signal', d.current_signal === 1 ? 'LONG' : d.current_signal === -1 ? 'SHORT' : 'FLAT')}
+        ${_btMetricRow('½-Kelly size', d.kelly_pct + '%')}
+        <div style="margin-top:8px;font-size:10px;color:var(--muted)">
+          ${dsrOk ? 'dSR ≥ 0.5: more likely skill than luck after deflating for every variant tried.' :
+                    'dSR < 0.5: not statistically convincing once deflated against all ' + d.n_trials + ' variants ever tried on ' + d.ticker + '.'}
+          survivorship ✗ · PIT fundamentals ✗</div>
+      </div></div>`;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${e}</div>`;
+  } finally { btn.disabled = false; }
+}
+
+async function runAllBacktests() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) { alert('Enter a ticker first'); return; }
+  const body = document.getElementById('btLabBody');
+  const btn = document.getElementById('btAllBtn');
+  btn.disabled = true; btn.textContent = '⏳ racing…';
+  body.innerHTML = '<div style="color:var(--accent);text-align:center;padding:14px 0;font-size:13px">Backtesting all 8 strategies net of costs (one fetch, honest shared dSR)…</div>';
+  try {
+    const d = await (await fetch('/api/backtest/all', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker, period: document.getElementById('btPeriod').value,
+                            realistic_costs: document.getElementById('btCosts').checked})})).json();
+    if (d.error) { body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${d.error}</div>`; return; }
+    const th = 'text-align:right;color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;padding:4px 8px';
+    let html = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr><th style="${th};text-align:left">strategy</th><th style="${th}">Sharpe</th><th style="${th}">dSR</th>
+      <th style="${th}">Ann.ret</th><th style="${th}">MaxDD</th><th style="${th}">Win</th>
+      <th style="${th}">Trades</th><th style="${th}">Cost</th><th style="${th}">Size</th><th style="${th}">Now</th></tr>`;
+    const bh = d.buy_hold || {};
+    html += `<tr style="border-top:1px solid var(--border);color:var(--muted)">
+      <td style="padding:5px 8px">buy &amp; hold <span style="font-size:10px">(benchmark)</span></td>
+      <td style="text-align:right;padding:5px 8px">${bh.sharpe}</td><td style="text-align:right;padding:5px 8px">—</td>
+      <td style="text-align:right;padding:5px 8px">${bh.annualized_return_pct}%</td>
+      <td style="text-align:right;padding:5px 8px">${bh.max_dd_pct}%</td>
+      <td colspan="5" style="padding:5px 8px"></td></tr>`;
+    for (const r of (d.rows || [])) {
+      if (r.error) { html += `<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px">${r.strategy}</td><td colspan="9" style="color:var(--red);padding:5px 8px">${r.error}</td></tr>`; continue; }
+      const dsrCol = r.dsr >= 0.5 ? 'var(--green)' : 'var(--red)';
+      const sig = r.current_signal === 1 ? '<span style="color:var(--green)">LONG</span>' : r.current_signal === -1 ? '<span style="color:var(--red)">SHORT</span>' : '<span style="color:var(--yellow)">FLAT</span>';
+      html += `<tr style="border-top:1px solid var(--border)${r.beats_hold ? '' : ';opacity:.6'}">
+        <td style="padding:5px 8px">${r.strategy}${r.beats_hold ? '' : ' <span style="font-size:9px;color:var(--muted)">≤ hold</span>'}</td>
+        <td style="text-align:right;padding:5px 8px;font-weight:700">${r.sharpe}</td>
+        <td style="text-align:right;padding:5px 8px;font-weight:700;color:${dsrCol}">${r.dsr}</td>
+        <td style="text-align:right;padding:5px 8px">${r.annualized_return_pct}%</td>
+        <td style="text-align:right;padding:5px 8px">${r.max_dd_pct}%</td>
+        <td style="text-align:right;padding:5px 8px">${r.win_rate_pct}%</td>
+        <td style="text-align:right;padding:5px 8px">${r.n_trades}</td>
+        <td style="text-align:right;padding:5px 8px">${r.total_cost_pct}%</td>
+        <td style="text-align:right;padding:5px 8px">${r.kelly_pct}%</td>
+        <td style="text-align:right;padding:5px 8px">${sig}</td></tr>`;
+    }
+    html += `</table></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">
+        dSR deflated against n=${d.n_trials} (every variant ever tried on ${d.ticker}) · costs: ${d.cost_model} ·
+        dimmed rows failed to beat buy &amp; hold · survivorship ✗ · PIT ✗ ·
+        walk-forward + PBO: <a href="/fil" style="color:var(--accent)">FIL page →</a></div>`;
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${e}</div>`;
+  } finally { btn.disabled = false; btn.textContent = '⚔️ Compare all'; }
+}
+
+async function quickRec() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) { alert('Enter a ticker first'); return; }
+  const btn = document.getElementById('quickRecBtn');
+  const body = document.getElementById('recBody');
+  document.getElementById('recCard').style.display = 'block';
+  btn.disabled = true; btn.textContent = '⏳ computing…';
+  body.innerHTML = '<div style="color:var(--accent);text-align:center;padding:14px 0;font-size:13px">Fetching data + backtesting the 7-pillar core (no LLM)…</div>';
+  try {
+    const resp = await fetch('/api/recommendation', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker})});
+    const rec = await resp.json();
+    if (rec.error) body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${rec.error}</div>`;
+    else renderRecommendation(rec);
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${e}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '⚡ Quick Rec (no AI)';
+  }
+}
+
+function renderGrounding(pred, ticker) {
+  const grounding = pred.grounding || 'none';
+  const row = document.getElementById('groundingRow');
+  row.style.display = 'block';
+
+  const badge = document.getElementById('groundingBadge');
+  if (grounding === 'strategy') {
+    badge.textContent = '✓ Strategy-Grounded';
+    badge.className = 'grounded-badge strategy';
+  } else {
+    badge.textContent = '⚠ LLM-Only (no strategy agrees)';
+    badge.className = 'grounded-badge none';
+  }
+
+  const stratName = pred.grounding_strategy || '—';
+  document.getElementById('groundingStrategyName').textContent =
+    stratName !== '—' ? `Best strategy: ${stratName}` : 'No agreeing strategy found';
+
+  const fmt = v => v != null ? '$' + Number(v).toFixed(2) : '—';
+  const fmtN = (v, d=3) => v != null ? Number(v).toFixed(d) : '—';
+  const fmtPct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+
+  document.getElementById('gEntry').textContent  = fmt(pred.entry_price);
+  document.getElementById('gTarget').textContent = fmt(pred.target_price);
+  document.getElementById('gStop').textContent   = fmt(pred.stop_loss);
+  document.getElementById('gAtr').textContent    = pred.grounding_atr != null ? '$' + fmtN(pred.grounding_atr, 2) : '—';
+  document.getElementById('gSharpe').textContent = fmtN(pred.grounding_backtest_sharpe);
+  document.getElementById('gDsr').textContent    = fmtN(pred.grounding_dsr);
+  const kelly = pred.position_size;
+  document.getElementById('gKelly').textContent  = kelly != null ? (kelly * 100).toFixed(1) + '% of capital' : '—';
+  const hr = pred.grounding_historical_hit_rate;
+  const hrN = pred.grounding_hit_rate_n || 0;
+  document.getElementById('gHitRate').textContent =
+    hr != null ? fmtPct(hr) + ` (n=${hrN})` : `No history yet`;
+
+  // Note
+  const note = document.getElementById('groundingNote');
+  if (grounding === 'strategy') {
+    const n = pred.n_agreeing_strategies || 0;
+    note.textContent = `${n} of 7 strategies agree with this call. Entry = current price. ` +
+      `Stop = 1.5 × ATR(14). Target = 2:1 risk-reward. Kelly size = half-Kelly, capped at 10% of capital.`;
+  } else {
+    const noEdge = pred.n_directional_no_edge || 0;
+    const extra = noEdge > 0
+      ? ` (${noEdge} strategy${noEdge>1?'ies':''} point this way but have no positive historical edge, so they don't count as support.)`
+      : '';
+    note.textContent = 'No backtested strategy with a positive edge currently agrees with this direction.' + extra +
+      ' Conviction has been downgraded to LOW. Numeric levels shown are the LLM\'s estimates, not formula-computed.';
+  }
+
+  // Strategy signal pills
+  const pills = document.getElementById('strategySignals');
+  pills.innerHTML = '';
+  const sigs = pred.all_strategy_signals || {};
+  Object.entries(sigs).forEach(([name, sig]) => {
+    const cls = sig === 1 ? 'bull' : sig === -1 ? 'bear' : 'flat';
+    const icon = sig === 1 ? '▲' : sig === -1 ? '▼' : '—';
+    pills.innerHTML += `<span class="sig-pill ${cls}">${icon} ${name}</span>`;
+  });
+
+  // Load history for this ticker
+  loadTrackHistory(ticker);
+}
+
+async function loadTrackHistory(ticker) {
+  try {
+    const r = await fetch(API_BASE + '/api/track/history?ticker=' + ticker + '&limit=10');
+    if (!r.ok) return;
+    const data = await r.json();
+    const rows = data.rows || [];
+    const trackRow = document.getElementById('trackRow');
+    const tbody = document.getElementById('trackBody');
+    if (rows.length === 0) { trackRow.style.display = 'none'; return; }
+    trackRow.style.display = 'block';
+    document.getElementById('trackCount').textContent = `(${rows.length} most recent)`;
+    tbody.innerHTML = rows.map(row => {
+      const pct = row.realized_pct_change;
+      const pctStr = pct != null ? `<span class="${pct >= 0 ? 'pos' : 'neg'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>` : '—';
+      const dir = row.direction_correct;
+      const outcome = dir != null ? (dir ? '<span class="pos">✓</span>' : '<span class="neg">✗</span>') + ' ' + pctStr : pctStr;
+      return `<tr>
+        <td>${(row.created_at||'').slice(0,10)}</td>
+        <td style="font-weight:700">${row.ticker}</td>
+        <td>${row.action||'—'}</td>
+        <td>${row.entry_price != null ? '$'+Number(row.entry_price).toFixed(2) : '—'}</td>
+        <td>${row.target_price != null ? '$'+Number(row.target_price).toFixed(2) : '—'}</td>
+        <td>${row.stop_loss != null ? '$'+Number(row.stop_loss).toFixed(2) : '—'}</td>
+        <td style="font-size:10px;color:var(--muted)">${row.grounding_strategy||'—'}</td>
+        <td>${row.conviction||'—'}</td>
+        <td>${outcome}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { /* silently skip */ }
+}
+
+// ── Composite Decision Report ─────────────────────────────────────────────
+async function fetchDecisionReport() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) { alert('Enter a ticker first'); return; }
+  const btn = document.getElementById('decisionBtn');
+  const body = document.getElementById('decisionBody');
+  const owns = document.getElementById('ownsPosition').checked;
+  btn.disabled = true; btn.textContent = '⏳ synthesizing…';
+  body.innerHTML = '<div style="color:var(--accent);text-align:center;padding:14px 0;font-size:13px">Running recommendation + backtest + calibration + ranking…</div>';
+  try {
+    const resp = await fetch('/api/decision', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker, owns_position: owns})});
+    const report = await resp.json();
+    if (report.error) body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${report.error}</div>`;
+    else renderDecisionReport(report);
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${e}</div>`;
+  } finally { btn.disabled = false; btn.textContent = '📊 Generate Report'; }
+}
+
+function renderDecisionReport(d) {
+  const body = document.getElementById('decisionBody');
+  const f2 = v => v != null ? Number(v).toFixed(2) : '—';
+  const f1 = v => v != null ? Number(v).toFixed(1) : '—';
+  const f0 = v => v != null ? Math.round(v) : '—';
+  const pct = v => v != null ? (v*100).toFixed(0)+'%' : '—';
+  const actionCls = {'BUY':'buy','ACCUMULATE':'buy','HOLD':'hold','SELL':'sell','REDUCE':'sell','AVOID':'sell'};
+  const actionCol = {'buy':'var(--green)','hold':'var(--yellow)','sell':'var(--red)'};
+  const cls = actionCls[d.final_action] || 'hold';
+  const col = actionCol[cls];
+
+  // Confidence dimensions
+  const cf = d.confidence || {};
+  const cfColor = lvl => lvl==='HIGH'?'var(--green)':lvl==='MEDIUM'?'var(--yellow)':'var(--red)';
+  const cfBadge = (label, dim) => {
+    const c = cf[dim] || {level:'—'};
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0">
+      <span style="color:var(--muted);font-size:11px">${label}</span>
+      <span style="font-weight:800;font-size:11px;color:${cfColor(c.level)}">${c.level}</span></div>`;
+  };
+
+  // Agent score bars
+  const agents = d.agent_scores || {};
+  const pillarOrder = ['technical','algo','risk','fundamentals','research','social'];
+  const agentBars = pillarOrder.map(name => {
+    const a = agents[name] || {};
+    const s = a.score != null ? a.score : 50;
+    const dim = a.backtestable ? '' : 'opacity:.55;';
+    const tag = a.backtestable ? '' : '<span style="font-size:9px;color:var(--muted)"> fwd</span>';
+    const barCol = s >= 60 ? 'var(--green)' : s <= 40 ? 'var(--red)' : 'var(--yellow)';
+    return `<div style="${dim}margin-bottom:5px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:1px">
+        <span style="color:var(--muted);text-transform:capitalize">${name}${tag}</span>
+        <span style="font-weight:700">${f0(s)}</span></div>
+      <div style="background:var(--bg3);border-radius:4px;height:6px;overflow:hidden">
+        <div style="width:${s}%;height:100%;background:${barCol};border-radius:4px"></div></div>
+    </div>`;
+  }).join('');
+
+  // Consensus
+  const cons = d.consensus || {};
+  const consPills = (list, color) => (list||[]).map(n =>
+    `<span style="font-size:10px;padding:1px 7px;border-radius:5px;background:rgba(${color},.12);color:var(--${color==='0,230,118'?'green':color==='255,23,68'?'red':'muted'})">${n}</span>`
+  ).join(' ');
+
+  // Backtest
+  const bt = d.backtest || {};
+  const btLib = bt.library_summary || {};
+
+  // Calibration
+  const cal = d.calibration || {};
+
+  // Cross-sectional
+  const xsec = d.cross_sectional_rank || {};
+
+  // Scenarios
+  const sc = d.scenarios || {};
+  const listItems = (arr, color) => (arr||[]).map(t =>
+    `<div style="font-size:11px;color:var(--${color});padding:2px 0">• ${t}</div>`).join('');
+
+  // Warnings
+  const warns = (d.warnings||[]).map(w =>
+    `<div style="font-size:10px;color:var(--yellow);padding:1px 0">⚠ ${w}</div>`).join('');
+
+  const arrow = cls==='buy'?'↑':cls==='sell'?'↓':'→';
+  const gradFrom = cls==='buy'?'#00e676':cls==='sell'?'#ff1744':'#ffea00';
+  const gradTo = cls==='buy'?'#00b4d8':cls==='sell'?'#ff6b6b':'#ff9800';
+
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:220px 1fr;gap:18px">
+      <!-- Left: action + confidence -->
+      <div style="border-right:1px solid var(--border);padding-right:14px">
+        <div style="text-align:center;padding:14px 0;margin:-18px -14px 10px 0;border-radius:10px 0 0 0;background:linear-gradient(135deg,${gradFrom}22,${gradTo}11);border-bottom:2px solid ${col}">
+          <div style="font-size:14px;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:2px;margin-bottom:4px">${arrow} ${d.final_action}</div>
+          <div style="font-size:48px;font-weight:900;color:${col};line-height:1">${f1(d.composite_score)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">composite / 100</div>
+        </div>
+        <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Confidence</div>
+          ${cfBadge('📖 Thesis','thesis')}
+          ${cfBadge('🗂️ Data','data')}
+          ${cfBadge('📈 Statistical','statistical')}
+          ${cfBadge('⚖️ Allocation','allocation')}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+          <div>horizon ~${d.time_horizon_days||'—'}d</div>
+          <div>size ${d.position_size_gated?'<span style="color:var(--red)">0% gated</span>':f1(d.position_size_pct)+'%'}</div>
+          <div style="font-size:10px;margin-top:4px">
+            entry $${f2((d.levels||{}).entry_zone_low)}–$${f2((d.levels||{}).entry_zone_high)}<br>
+            <span style="color:var(--green)">target $${f2((d.levels||{}).target_price)}</span> ·
+            <span style="color:var(--red)">stop $${f2((d.levels||{}).stop_loss)}</span>
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px">
+          ${d.action_rationale||''}
+        </div>
+      </div>
+      <!-- Right: details -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <!-- Agent scores -->
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">7-Agent Scores</div>
+          ${agentBars}
+          <div style="margin-top:6px;font-size:10px">
+            <span style="color:var(--muted)">Consensus:</span> ${cons.summary||'—'}
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+            ${consPills(cons.agreeing,'0,230,118')}
+            ${consPills(cons.conflicting,'255,23,68')}
+            ${consPills(cons.neutral,'107,127,163')}
+          </div>
+        </div>
+        <!-- Backtest + calibration + xsec -->
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Backtest Evidence</div>
+          <div style="font-size:12px;line-height:1.7;margin-bottom:8px">${bt.interpretation||'—'}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
+            <div style="background:var(--bg3);border-radius:6px;padding:6px;text-align:center">
+              <div style="font-size:9px;color:var(--muted)">Sharpe</div>
+              <div style="font-size:14px;font-weight:700">${f2(bt.sharpe)}</div></div>
+            <div style="background:var(--bg3);border-radius:6px;padding:6px;text-align:center">
+              <div style="font-size:9px;color:var(--muted)">dSR</div>
+              <div style="font-size:14px;font-weight:700;color:${(bt.dsr||0)>=0.5?'var(--green)':'var(--red)'}">${f2(bt.dsr)}</div></div>
+            <div style="background:var(--bg3);border-radius:6px;padding:6px;text-align:center">
+              <div style="font-size:9px;color:var(--muted)">Max DD</div>
+              <div style="font-size:14px;font-weight:700;color:var(--red)">${f1((bt.max_drawdown||0)*100)}%</div></div>
+            <div style="background:var(--bg3);border-radius:6px;padding:6px;text-align:center">
+              <div style="font-size:9px;color:var(--muted)">Trades</div>
+              <div style="font-size:14px;font-weight:700">${bt.n_trades||'—'}</div></div>
+          </div>
+          ${btLib.n_strategies ? `<div style="font-size:10px;color:var(--muted);margin-bottom:8px">
+            Library: ${btLib.beating_buy_hold}/${btLib.n_strategies} strategies beat buy&hold.
+            Best: ${btLib.best_strategy} (dSR ${f2(btLib.best_dsr)}).</div>` : ''}
+
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:4px">Prediction Calibration</div>
+          <div style="font-size:12px;line-height:1.6;margin-bottom:10px">${cal.interpretation||'No data.'}</div>
+
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Cross-Sectional Rank</div>
+          <div style="font-size:12px;line-height:1.6">${xsec.interpretation||'Not available.'}</div>
+          ${xsec.rank ? `<div style="font-size:11px;margin-top:2px"><b>#${xsec.rank}</b> / ${xsec.n_securities} · percentile ${pct(xsec.percentile)}</div>` : ''}
+        </div>
+      </div>
+    </div>
+    <!-- Scenarios row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      <div>
+        <div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Bull Case</div>
+        <div style="font-size:12px;line-height:1.6">${sc.bull_case||'—'}</div>
+        ${(sc.catalysts||[]).length ? `<div style="margin-top:6px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Catalysts</div>${listItems(sc.catalysts,'green')}</div>` : ''}
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Base Case</div>
+        <div style="font-size:12px;line-height:1.6">${sc.base_case||'—'}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Bear Case</div>
+        <div style="font-size:12px;line-height:1.6">${sc.bear_case||'—'}</div>
+        ${(sc.risks||[]).length ? `<div style="margin-top:6px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Risks</div>${listItems(sc.risks,'red')}</div>` : ''}
+      </div>
+    </div>
+    ${(sc.thesis_breakers||[]).length ? `<div style="margin-top:8px;padding:8px;background:rgba(255,23,68,.06);border:1px solid rgba(255,23,68,.2);border-radius:8px">
+      <div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Thesis Breakers</div>
+      ${listItems(sc.thesis_breakers,'red')}
+    </div>` : ''}
+    <!-- Warnings + evidence -->
+    ${warns ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px">${warns}</div>` : ''}
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px">
+      fingerprint <b>${(d.decision_fingerprint||'').slice(0,8)}</b>
+      → rec <b>${(d.recommendation_fingerprint||'').slice(0,8)}</b>
+      · ${d.disclaimer || ''}
+    </div>`;
+}
+
+// Enter key support
+document.getElementById('ticker').addEventListener('keydown', e => {
+  if (e.key === 'Enter') analyze();
+});
+
+window.addEventListener('resize', () => {
+  if (currentResult?.signal_summary) {
+    const q = {sparkline: [], ...currentResult};
+    // redraw if we have sparkline data - skip for now, just resize
+  }
+});
+</script>
+</body>
+</html>
