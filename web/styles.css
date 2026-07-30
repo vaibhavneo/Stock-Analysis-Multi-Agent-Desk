@@ -1618,6 +1618,55 @@ li {
   font-size: .8rem;
 }
 
+.portfolio-row:hover {
+  background: var(--surface2, rgba(255,255,255,.04));
+}
+
+.portfolio-detail-row td {
+  padding: 0;
+  border-top: none;
+}
+
+.strategy-detail {
+  background: var(--surface2, rgba(255,255,255,.04));
+  border-left: 3px solid var(--accent, #6b8cff);
+  border-radius: .35rem;
+  padding: .75rem 1rem;
+  margin: .25rem 0 .75rem;
+}
+
+.strategy-verdict {
+  margin: 0 0 .5rem;
+  font-size: .9rem;
+}
+
+.agent-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .6rem;
+  margin-bottom: .5rem;
+}
+
+.agent-breakdown p {
+  margin: .2rem 0 0;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+.agent-label {
+  font-size: .72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--accent, #6b8cff);
+}
+
+.price-signal {
+  margin: .5rem 0 0;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
 @media (max-width: 600px) {
   .portfolio-summary {
     grid-template-columns: 1fr 1fr;

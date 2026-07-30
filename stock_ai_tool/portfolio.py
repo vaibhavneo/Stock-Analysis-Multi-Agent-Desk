@@ -5,7 +5,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .analysis import analyze_symbol
 from .models import FundamentalSnapshot, PriceBar, SymbolProfile
+from .prediction import price_target
 
 
 @dataclass
@@ -73,6 +75,63 @@ def remove_position(portfolio: Portfolio, symbol: str, shares: float) -> Portfol
     return portfolio
 
 
+def _agent_composite(orchestrator_result: dict, symbol: str) -> Optional[dict]:
+    """Recompute the 3-agent composite (sector/fundamental/technical) for ANY
+    symbol, not just the top-N picks the recommendation agent kept."""
+    actions = orchestrator_result.get("actions", {})
+    sector_map = {a["symbol"]: a for a in actions.get("sector_analysis", [])}
+    fundamental_map = {a["symbol"]: a for a in actions.get("fundamental_analysis", [])}
+    technical_map = {a["symbol"]: a for a in actions.get("technical_analysis", [])}
+    if symbol not in sector_map or symbol not in fundamental_map or symbol not in technical_map:
+        return None
+
+    sector = sector_map[symbol]["score"]
+    fundamental = fundamental_map[symbol]["score"]
+    technical = technical_map[symbol]["score"]
+    composite = round(0.20 * sector + 0.35 * fundamental + 0.45 * technical, 3)
+
+    if composite >= 0.72:
+        action = "STRONG_BUY"
+    elif composite >= 0.60:
+        action = "BUY"
+    elif composite >= 0.45:
+        action = "HOLD"
+    else:
+        action = "REDUCE"
+
+    return {
+        "sector_score": sector,
+        "fundamental_score": fundamental,
+        "technical_score": technical,
+        "composite_score": composite,
+        "action": action,
+        "sector_summary": sector_map[symbol]["summary"],
+        "fundamental_summary": fundamental_map[symbol]["summary"],
+        "technical_summary": technical_map[symbol]["summary"],
+    }
+
+
+def _strategy_verdict(agent_action: str, price_signal: str) -> tuple[str, str]:
+    """Blend the fundamental/technical/sector composite action with the
+    price-timing signal from prediction.price_target into one final call."""
+    bullish_agent = agent_action in ("STRONG_BUY", "BUY")
+    bearish_agent = agent_action == "REDUCE"
+
+    if bullish_agent and price_signal in ("BUY_WINDOW", "BULLISH"):
+        return "BUY", "Agents and price timing both favor entry — accumulate."
+    if bullish_agent and price_signal == "TAKE_PROFIT_ZONE":
+        return "HOLD", "Fundamentals/technicals are strong but price is extended near-term; wait for a pullback before adding."
+    if bearish_agent and price_signal in ("TAKE_PROFIT_ZONE", "CAUTIOUS"):
+        return "SELL", "Weak composite score and deteriorating price action both point to trimming or exiting."
+    if bearish_agent:
+        return "TRIM", "Composite score has weakened versus peers; consider reducing exposure."
+    if agent_action == "HOLD" and price_signal == "BUY_WINDOW":
+        return "HOLD/ADD", "Composite is neutral, but the price is at a favorable entry if you want to add."
+    if agent_action == "HOLD" and price_signal == "TAKE_PROFIT_ZONE":
+        return "TRIM", "Composite is neutral and price looks stretched — a good spot to lighten up."
+    return "HOLD", "Signals are mixed; maintain the current position and monitor."
+
+
 def portfolio_report(
     portfolio: Portfolio,
     bars_by_symbol: Dict[str, List[PriceBar]],
@@ -80,14 +139,6 @@ def portfolio_report(
     fundamentals: Dict[str, FundamentalSnapshot],
     orchestrator_result: Optional[dict] = None,
 ) -> dict:
-    action_map: Dict[str, str] = {}
-    if orchestrator_result:
-        for theme_recs in orchestrator_result.get("top_by_theme", {}).values():
-            for rec in theme_recs:
-                sym = rec.get("symbol", "")
-                if sym and sym not in action_map:
-                    action_map[sym] = rec.get("action", "HOLD")
-
     positions_out = []
     total_cost = 0.0
     total_value = 0.0
@@ -100,6 +151,22 @@ def portfolio_report(
         pnl = market_value - cost_basis
         pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0.0
 
+        agent_composite = (
+            _agent_composite(orchestrator_result, pos.symbol) if orchestrator_result else None
+        )
+        agent_action = agent_composite["action"] if agent_composite else "HOLD"
+
+        prediction = None
+        if bars:
+            try:
+                report = analyze_symbol(bars)
+                prediction = price_target(pos.symbol, bars, fundamentals.get(pos.symbol), report)
+            except Exception:
+                prediction = None
+        price_signal = prediction["signal"] if prediction else "NEUTRAL"
+
+        strategy, strategy_reason = _strategy_verdict(agent_action, price_signal)
+
         positions_out.append({
             "symbol": pos.symbol,
             "shares": pos.shares,
@@ -108,7 +175,12 @@ def portfolio_report(
             "market_value": round(market_value, 2),
             "unrealized_pnl": round(pnl, 2),
             "pnl_pct": round(pnl_pct, 2),
-            "action": action_map.get(pos.symbol, "HOLD"),
+            "action": agent_action,
+            "agent_composite": agent_composite,
+            "price_signal": price_signal,
+            "price_targets": prediction["targets"] if prediction else None,
+            "strategy": strategy,
+            "strategy_reason": strategy_reason,
         })
         total_cost += cost_basis
         total_value += market_value

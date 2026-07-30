@@ -1299,11 +1299,22 @@ function pctPnl(value) {
   return `${prefix}${n.toFixed(2)}%`;
 }
 
+function strategyPill(strategy) {
+  const text = String(strategy || "HOLD").replaceAll("_", " ");
+  const normalized = text.toLowerCase();
+  const className = normalized.includes("buy")
+    ? "good"
+    : normalized.includes("sell") || normalized.includes("trim")
+      ? "bad"
+      : "neutral";
+  return `<span class="pill ${className}">${escapeHtml(text)}</span>`;
+}
+
 function renderPortfolio(data) {
   const tbody = document.querySelector("#portfolio-table");
   const summary = document.querySelector("#portfolio-summary");
   if (!data || !data.positions) {
-    tbody.innerHTML = `<tr><td colspan="8">No portfolio data.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9">No portfolio data.</td></tr>`;
     return;
   }
 
@@ -1318,21 +1329,46 @@ function renderPortfolio(data) {
   pctEl.className = data.total_pnl_pct >= 0 ? "up" : "down";
   summary.style.display = "";
 
-  // holdings table
-  const rows = data.positions.map(p => {
+  // holdings table — each row is followed by a collapsible rationale row
+  const rows = data.positions.map((p, i) => {
     const pnlClass = p.unrealized_pnl >= 0 ? "up" : "down";
-    return `<tr>
-      <td><strong>${escapeHtml(p.symbol)}</strong></td>
+    const composite = p.agent_composite ? p.agent_composite.composite_score.toFixed(2) : "--";
+    const detailId = `port-detail-${i}`;
+    const ac = p.agent_composite;
+    const detail = `
+      <div class="strategy-detail">
+        <p class="strategy-verdict"><strong>${escapeHtml(p.strategy || "HOLD")}</strong> — ${escapeHtml(p.strategy_reason || "")}</p>
+        ${ac ? `
+        <div class="agent-breakdown">
+          <div><span class="agent-label">Sector (${ac.sector_score.toFixed(2)})</span><p>${escapeHtml(ac.sector_summary)}</p></div>
+          <div><span class="agent-label">Fundamental (${ac.fundamental_score.toFixed(2)})</span><p>${escapeHtml(ac.fundamental_summary)}</p></div>
+          <div><span class="agent-label">Technical (${ac.technical_score.toFixed(2)})</span><p>${escapeHtml(ac.technical_summary)}</p></div>
+        </div>` : `<p class="subtle">No agent data available for this symbol.</p>`}
+        ${p.price_targets ? `
+        <p class="price-signal"><span class="agent-label">Price Signal</span> ${escapeHtml((p.price_signal || "").replaceAll("_", " "))} ·
+          1W ${money(p.price_targets["1_week"])} · 1M ${money(p.price_targets["1_month"])} · 3M ${money(p.price_targets["3_month"])}</p>` : ""}
+      </div>`;
+    return `<tr class="portfolio-row" data-detail-target="${detailId}" style="cursor:pointer">
+      <td><strong>${escapeHtml(p.symbol)}</strong> <span class="subtle">▾</span></td>
       <td>${p.shares}</td>
       <td>${money(p.avg_cost)}</td>
       <td>${money(p.current_price)}</td>
       <td>${money(p.market_value)}</td>
       <td class="${pnlClass}">${dollarPnl(p.unrealized_pnl)}</td>
       <td class="${pnlClass}">${pctPnl(p.pnl_pct)}</td>
-      <td>${pill(p.action)}</td>
-    </tr>`;
+      <td>${composite}</td>
+      <td>${strategyPill(p.strategy)}</td>
+    </tr>
+    <tr class="portfolio-detail-row" id="${detailId}" style="display:none"><td colspan="9">${detail}</td></tr>`;
   }).join("");
-  tbody.innerHTML = rows || `<tr><td colspan="8">No positions.</td></tr>`;
+  tbody.innerHTML = rows || `<tr><td colspan="9">No positions.</td></tr>`;
+
+  tbody.querySelectorAll(".portfolio-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const target = document.getElementById(row.dataset.detailTarget);
+      if (target) target.style.display = target.style.display === "none" ? "" : "none";
+    });
+  });
 
   // sector allocation bar
   const alloc = data.sector_allocation || {};
@@ -1368,7 +1404,7 @@ function renderPortfolio(data) {
 
 async function loadPortfolio() {
   const tbody = document.querySelector("#portfolio-table");
-  tbody.innerHTML = `<tr><td colspan="8">Loading…</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="9">Loading…</td></tr>`;
   try {
     const base = API_BASES[0] || `http://127.0.0.1:8765`;
     const res = await fetch(`${base}/api/portfolio?mode=${currentMode}`);
@@ -1376,7 +1412,7 @@ async function loadPortfolio() {
     if (data.error) throw new Error(data.error);
     renderPortfolio(data);
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--bad-fg, red)">${escapeHtml(compactErrorMessage(err))}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="color:var(--bad-fg, red)">${escapeHtml(compactErrorMessage(err))}</td></tr>`;
   }
 }
 
