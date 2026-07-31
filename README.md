@@ -47,10 +47,10 @@ python3 -m stock_ai_tool.cli multiagent \
 Launch the browser UI:
 
 ```bash
-python3 -m stock_ai_tool.web_server --port 8765
+python3 -m stock_ai_tool.web_server --port 5052
 ```
 
-Then open `http://127.0.0.1:8765`.
+Then open `http://127.0.0.1:5052`.
 
 Run the full AI + quantum universe:
 

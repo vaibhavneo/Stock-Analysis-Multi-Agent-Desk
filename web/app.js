@@ -3,9 +3,7 @@ const API_PROTOCOL = IS_HTTP_PAGE ? location.protocol : "http:";
 const API_HOST = location.hostname || "127.0.0.1";
 const API_BASES = [
   ...(IS_HTTP_PAGE ? [location.origin] : []),
-  `${API_PROTOCOL}//${API_HOST}:5051`,
-  `${API_PROTOCOL}//${API_HOST}:8765`,
-  `${API_PROTOCOL}//${API_HOST}:8766`,
+  `${API_PROTOCOL}//${API_HOST}:5052`,
 ].filter((value, index, values) => values.indexOf(value) === index);
 
 const SCENARIOS = {
@@ -1406,7 +1404,7 @@ async function loadPortfolio() {
   const tbody = document.querySelector("#portfolio-table");
   tbody.innerHTML = `<tr><td colspan="9">Loading…</td></tr>`;
   try {
-    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const base = API_BASES[0] || `http://127.0.0.1:5052`;
     const res = await fetch(`${base}/api/portfolio?mode=${currentMode}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -1420,7 +1418,7 @@ async function addPortfolioPosition(symbol, shares, cost) {
   const statusEl = document.querySelector("#add-pos-status");
   statusEl.textContent = "Saving…";
   try {
-    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const base = API_BASES[0] || `http://127.0.0.1:5052`;
     const res = await fetch(`${base}/api/portfolio`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1538,7 +1536,7 @@ async function loadReport(period) {
   const out = document.querySelector("#report-output");
   out.innerHTML = `<p class="subtle">Generating ${period} report…</p>`;
   try {
-    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const base = API_BASES[0] || `http://127.0.0.1:5052`;
     const res = await fetch(`${base}/api/report?period=${period}&mode=${currentMode}`);
     const data = await res.json();
     renderReport(data);
@@ -1613,7 +1611,7 @@ async function runIntrospection(symbol, days) {
   const out = document.querySelector("#introspect-output");
   out.innerHTML = `<p class="subtle">Running walk-forward backtest for ${escapeHtml(symbol)}…</p>`;
   try {
-    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const base = API_BASES[0] || `http://127.0.0.1:5052`;
     const res = await fetch(`${base}/api/introspect?symbol=${encodeURIComponent(symbol)}&mode=${currentMode}&days=${days}`);
     const data = await res.json();
     renderIntrospection(data);
