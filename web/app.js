@@ -1547,6 +1547,89 @@ async function loadReport(period) {
   }
 }
 
+function gradeClass(grade) {
+  switch (grade) {
+    case "STRONG": return "good";
+    case "MODERATE": return "neutral";
+    case "WEAK": return "warn";
+    default: return "bad";
+  }
+}
+
+function renderIntrospection(data) {
+  const out = document.querySelector("#introspect-output");
+  if (!data || data.error) {
+    out.innerHTML = `<p style="color:var(--bad-fg, red)">${escapeHtml(data?.error || "No data")}</p>`;
+    return;
+  }
+
+  const scoreClass = gradeClass(data.grade);
+  const recentHistory = (data.history || []).slice(-20).reverse();
+  const truncatedNote = data.history && data.history.length > 20
+    ? `<p class="subtle">Showing the most recent 20 of ${data.history.length} scored days.</p>`
+    : "";
+
+  const historyRows = recentHistory.map(h => {
+    const hitClass = h.direction_hit ? "up" : "down";
+    return `<tr>
+      <td>${escapeHtml(h.date)}</td>
+      <td>${money(h.predicted_close)}</td>
+      <td>${money(h.actual_close)}</td>
+      <td>${h.pct_error.toFixed(2)}%</td>
+      <td>${escapeHtml(h.predicted_direction)} / ${escapeHtml(h.actual_direction)}</td>
+      <td class="${hitClass}">${h.direction_hit ? "✓ hit" : "✗ miss"}</td>
+    </tr>`;
+  }).join("");
+
+  out.innerHTML = `
+    <div class="introspect-summary">
+      <div class="introspect-score">
+        <span class="pill ${scoreClass} introspect-grade">${escapeHtml(data.grade)}</span>
+        <strong class="introspect-score-num">${data.accuracy_score}</strong>
+        <span class="subtle">/ 100 accuracy score</span>
+      </div>
+      <div class="introspect-stats">
+        <div><span>Direction Accuracy</span><strong>${data.direction_accuracy_pct}%</strong></div>
+        <div><span>Avg Price Error</span><strong>${data.mape_pct}%</strong></div>
+        <div><span>Median Error</span><strong>${data.median_error_pct}%</strong></div>
+        <div><span>Days Scored</span><strong>${data.trials}</strong></div>
+      </div>
+      <p class="subtle">Backtested ${escapeHtml(data.days_covered || "")}. Each prediction used only data available as of that day — no lookahead.</p>
+    </div>
+    <div class="report-grid" style="margin-top:.75rem">
+      <div class="report-card"><span class="subtle">Best Call</span><strong>${escapeHtml(data.best_call.date)}</strong><small>Predicted ${money(data.best_call.predicted_close)} vs actual ${money(data.best_call.actual_close)} (${data.best_call.pct_error.toFixed(2)}% off)</small></div>
+      <div class="report-card" style="border-color:#ef4444"><span class="subtle">Worst Call</span><strong>${escapeHtml(data.worst_call.date)}</strong><small>Predicted ${money(data.worst_call.predicted_close)} vs actual ${money(data.worst_call.actual_close)} (${data.worst_call.pct_error.toFixed(2)}% off)</small></div>
+    </div>
+    ${truncatedNote}
+    <div class="table-wrap" style="margin-top:.75rem">
+      <table>
+        <thead><tr><th>Date</th><th>Predicted</th><th>Actual</th><th>Error</th><th>Pred/Actual Dir</th><th>Direction</th></tr></thead>
+        <tbody>${historyRows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function runIntrospection(symbol, days) {
+  const out = document.querySelector("#introspect-output");
+  out.innerHTML = `<p class="subtle">Running walk-forward backtest for ${escapeHtml(symbol)}…</p>`;
+  try {
+    const base = API_BASES[0] || `http://127.0.0.1:8765`;
+    const res = await fetch(`${base}/api/introspect?symbol=${encodeURIComponent(symbol)}&mode=${currentMode}&days=${days}`);
+    const data = await res.json();
+    renderIntrospection(data);
+  } catch (err) {
+    out.innerHTML = `<p style="color:var(--bad-fg, red)">${escapeHtml(compactErrorMessage(err))}</p>`;
+  }
+}
+
+document.querySelector("#introspect-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const symbol = document.querySelector("#introspect-symbol")?.value?.trim().toUpperCase();
+  const days = document.querySelector("#introspect-days")?.value || "63";
+  if (!symbol) return;
+  runIntrospection(symbol, days);
+});
+
 // wire up portfolio
 document.querySelector("#portfolio-refresh-btn")?.addEventListener("click", loadPortfolio);
 

@@ -442,6 +442,11 @@ td small {
   color: var(--blue);
 }
 
+.pill.warn {
+  background: rgba(173, 122, 34, 0.14);
+  color: var(--amber);
+}
+
 .cards-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -1665,6 +1670,73 @@ li {
   margin: .5rem 0 0;
   font-size: .8rem;
   color: var(--muted);
+}
+
+.introspect-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  margin: .75rem 0 1rem;
+}
+
+.introspect-form label {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+.introspect-form input {
+  min-width: 140px;
+}
+
+.introspect-summary {
+  background: var(--surface2, rgba(255,255,255,.04));
+  border: 1px solid var(--line);
+  border-radius: .6rem;
+  padding: 1rem 1.25rem;
+}
+
+.introspect-score {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  margin-bottom: .75rem;
+}
+
+.introspect-grade {
+  min-height: 26px;
+}
+
+.introspect-score-num {
+  font-size: 2.1rem;
+  line-height: 1;
+}
+
+.introspect-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: .75rem;
+  margin-bottom: .5rem;
+}
+
+.introspect-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
+
+.introspect-stats span {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--muted);
+}
+
+.introspect-stats strong {
+  font-size: 1.15rem;
 }
 
 @media (max-width: 600px) {

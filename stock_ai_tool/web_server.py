@@ -13,6 +13,7 @@ from .multiagent import MultiAgentOrchestrator
 from .prediction import price_target as calc_price_target, prediction_for_all
 from .portfolio import load_portfolio, save_portfolio, add_position, remove_position, portfolio_report
 from .report_scheduler import generate_report
+from .introspection import backtest_next_day
 from .symbols import parse_symbol_filter
 
 
@@ -160,6 +161,9 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/report":
             self._handle_report(parsed.query)
             return
+        if parsed.path == "/api/introspect":
+            self._handle_introspect(parsed.query)
+            return
         self._serve_static(parsed.path)
 
     def do_POST(self) -> None:
@@ -290,6 +294,28 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         try:
             result = generate_report(period=period, portfolio_path=str(PORTFOLIO_JSON), mode=mode)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+        self._send_json(result)
+
+    def _handle_introspect(self, query: str) -> None:
+        params = parse_qs(query)
+        symbol = params.get("symbol", [""])[0].strip().upper()
+        mode = params.get("mode", ["live"])[0].strip().lower()
+        days_raw = params.get("days", ["63"])[0]
+        if not symbol:
+            self._send_json({"error": "symbol is required"}, status=400)
+            return
+        try:
+            days = max(10, min(180, int(days_raw)))
+            resolved = next(iter(parse_symbol_filter(symbol)), symbol)
+            bars, _, _, _ = load_market_inputs(mode=mode, symbols={resolved})
+            sym_bars = bars.get(resolved)
+            if not sym_bars:
+                self._send_json({"error": f"No data for {resolved}"}, status=404)
+                return
+            result = backtest_next_day(resolved, sym_bars, lookback_days=days)
         except Exception as exc:
             self._send_json({"error": str(exc)}, status=400)
             return

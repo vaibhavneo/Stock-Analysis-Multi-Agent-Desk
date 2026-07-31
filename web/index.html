@@ -176,6 +176,20 @@
         </div>
         <div id="report-output" class="report-output"><p class="subtle">Select a report period above.</p></div>
       </section>
+
+      <!-- ── Introspection Agent ───────────────────────────────── -->
+      <section class="panel introspect-section">
+        <div class="panel-header">
+          <div><p class="eyebrow">Introspection Agent</p><h2>How Accurate Is This Model, Really?</h2></div>
+        </div>
+        <p class="subtle">Walk-forward backtest: for each past trading day, the model predicts the <em>next</em> day's close using only data available up to that point, then checks itself against what actually happened. No hindsight.</p>
+        <form id="introspect-form" class="introspect-form">
+          <label>Symbol <input id="introspect-symbol" type="text" placeholder="NVDA" autocomplete="off" /></label>
+          <label>Lookback (days) <input id="introspect-days" type="number" min="10" max="180" value="63" /></label>
+          <button type="submit" class="primary">Run Backtest</button>
+        </form>
+        <div id="introspect-output" class="introspect-output"><p class="subtle">Enter a symbol and run a backtest.</p></div>
+      </section>
     </main>
 
     <script src="services/stockAnalysisService.js?v=12"></script>

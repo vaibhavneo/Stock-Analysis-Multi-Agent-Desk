@@ -117,6 +117,40 @@ def price_target(
     }
 
 
+def next_day_estimate(bars: List[PriceBar]) -> dict:
+    """Single-session-ahead price estimate driven by trend slope + RSI reversion.
+    Shared by the live predict endpoint and the introspection backtester so both
+    use the exact same model — the backtest is only meaningful if it scores the
+    same formula that powers the live signal."""
+    report = analyze_symbol(bars)
+    closes = [b.close for b in bars]
+    last_price = report.last_price
+    rsi = report.indicators.rsi
+    slope = _trend_slope(closes, 20)
+
+    if rsi < 40:
+        rsi_adj = 1 + (40 - rsi) / 200.0
+    elif rsi > 65:
+        rsi_adj = 1 - (rsi - 65) / 300.0
+    else:
+        rsi_adj = 1.0
+
+    predicted_close = max(0.01, (last_price + slope * 1) * rsi_adj)
+    if predicted_close > last_price:
+        direction = "UP"
+    elif predicted_close < last_price:
+        direction = "DOWN"
+    else:
+        direction = "FLAT"
+
+    return {
+        "last_price": round(last_price, 4),
+        "predicted_close": round(predicted_close, 4),
+        "predicted_direction": direction,
+        "signal": report.signal,
+    }
+
+
 def prediction_for_all(
     bars_by_symbol: Dict[str, List[PriceBar]],
     fundamentals: Dict[str, FundamentalSnapshot],
