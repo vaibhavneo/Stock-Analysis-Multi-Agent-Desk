@@ -165,7 +165,7 @@ class QuantumHandler(BaseHTTPRequestHandler):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Serve the Quantum Professor web UI")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8788)
+    parser.add_argument("--port", type=int, default=5052)
     return parser
 
 

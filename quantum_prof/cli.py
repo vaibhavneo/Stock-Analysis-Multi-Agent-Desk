@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_serve = sub.add_parser("serve", help="Start the web UI server")
     p_serve.add_argument("--host", default="127.0.0.1")
-    p_serve.add_argument("--port", type=int, default=8788)
+    p_serve.add_argument("--port", type=int, default=5052)
 
     p_ask = sub.add_parser("ask", help="Ask the AI professor a question")
     p_ask.add_argument("question", nargs="+", help="Your question")
