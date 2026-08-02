@@ -281,7 +281,7 @@
       title="Track your holdings and get a signal on each">💼 My Portfolio</button>
     <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
       <label for="costBasis" style="font-size:11px;color:var(--muted);white-space:nowrap">My Avg Cost $</label>
-      <input type="number" id="costBasis" placeholder="0.00" step="0.01" min="0"
+      <input type="number" id="costBasis" oninput="onCostBasisChange()" placeholder="0.00" step="0.01" min="0"
         style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;font-weight:700;width:90px;outline:none;transition:border-color .2s"
         onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"
         title="Enter your average purchase price to get position-aware P&L and recommendations">
@@ -470,12 +470,23 @@
       </div>
 
       <div class="chart-card">
-        <div class="card-title">📊 Price History</div>
-        <canvas id="sparkline-canvas" height="140"></canvas>
+        <div class="card-title">📊 Price History <span style="font-size:11px;color:var(--muted);font-weight:400">(3-Month)</span></div>
+        <div id="rangeSelector" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
+        <div style="position:relative">
+          <canvas id="sparkline-canvas" height="140"></canvas>
+          <div id="chartTooltip" style="display:none;position:absolute;pointer-events:none;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:11px;color:var(--text);white-space:nowrap;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,.35)"></div>
+        </div>
+        <div id="chartAxisLabels" style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--muted)"></div>
+        <div id="chartSummary" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6"></div>
+        <div id="avgCostSummary" style="margin-top:6px;font-size:11px;font-weight:600"></div>
         <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)">
           <span id="chartLow"></span>
           <span id="chartTicker" style="color:var(--accent);font-weight:700"></span>
           <span id="chartHigh"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:2px;font-size:10px;color:var(--muted);opacity:0.7">
+          <span id="chartStartDate"></span>
+          <span id="chartEndDate"></span>
         </div>
       </div>
     </div>
@@ -1221,6 +1232,8 @@ async function analyze() {
     if (qr.ok) {
       const q = await qr.json();
       renderQuickData(q);
+      renderRangeSelector(ticker);
+      loadPriceHistory(ticker, selectedPeriod);
     }
   } catch(e) {}
 
@@ -1298,7 +1311,7 @@ function handleEvent(type, payload) {
 
 function renderQuickData(q) {
   // Price chart
-  if (q.sparkline && q.sparkline.length > 0) drawSparkline(q.sparkline, q.ticker);
+  if (q.sparkline && q.sparkline.length > 0) drawSparkline(q.sparkline, q.ticker, q.sparkline_dates);
 
   // Signal meter
   const sig = q.signal_summary || {};
@@ -1533,7 +1546,7 @@ function renderMonteCarlo(algo, currentPrice) {
   mc.innerHTML += `<div style="font-size:10px;color:var(--muted);margin-top:4px">Current: $${currentPrice?.toFixed(2)} · 30-day GBM simulation · 1,000 paths</div>`;
 }
 
-function drawSparkline(closes, ticker) {
+function drawSparkline(closes, ticker, dates) {
   const canvas = document.getElementById('sparkline-canvas');
   const ctx = canvas.getContext('2d');
   canvas.width = canvas.offsetWidth * window.devicePixelRatio || 800;
@@ -1588,6 +1601,264 @@ function drawSparkline(closes, ticker) {
   document.getElementById('chartLow').textContent = '$'+min.toFixed(2);
   document.getElementById('chartHigh').textContent = '$'+max.toFixed(2);
   document.getElementById('chartTicker').textContent = ticker || '';
+  document.getElementById('chartStartDate').textContent = dates && dates.length ? dates[0] : '';
+  document.getElementById('chartEndDate').textContent = dates && dates.length ? dates[dates.length-1] : '';
+}
+
+// ---- Price History v2: range selector, real timestamps, tooltip, avg-cost line ----
+const PRICE_HISTORY_RANGES = [
+  {key:'1mo', label:'1M'}, {key:'3mo', label:'3M'}, {key:'6mo', label:'6M'},
+  {key:'ytd', label:'YTD'}, {key:'1y', label:'1Y'}, {key:'5y', label:'5Y'}, {key:'max', label:'MAX'}
+];
+let selectedPeriod = '3mo';
+let currentPriceHistory = null;
+let priceHistoryReqId = 0;
+
+function costBasisStorageKey(ticker) { return 'avgCost:' + ticker; }
+
+function renderRangeSelector(ticker) {
+  const rs = document.getElementById('rangeSelector');
+  if (!rs) return;
+  rs.innerHTML = PRICE_HISTORY_RANGES.map(r =>
+    `<button type="button" data-period="${r.key}" onclick="onRangeClick('${r.key}')"
+       style="background:${r.key===selectedPeriod?'var(--accent)':'var(--bg3)'};color:${r.key===selectedPeriod?'#04121b':'var(--muted)'};border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer">${r.label}</button>`
+  ).join('');
+}
+
+function onRangeClick(periodKey) {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) return;
+  selectedPeriod = periodKey;
+  renderRangeSelector(ticker);
+  loadPriceHistory(ticker, periodKey);
+}
+
+async function loadPriceHistory(ticker, periodKey) {
+  const myReqId = ++priceHistoryReqId;
+  const saved = localStorage.getItem(costBasisStorageKey(ticker));
+  const costEl = document.getElementById('costBasis');
+  if (costEl && saved && (!costEl.value || parseFloat(costEl.value) === 0)) costEl.value = saved;
+
+  renderRangeSelector(ticker);
+  const summaryEl = document.getElementById('chartSummary');
+  if (summaryEl) summaryEl.innerHTML = '<span style="opacity:.6">Loading ' + periodKey.toUpperCase() + '…</span>';
+  try {
+    const r = await fetch(API_BASE + '/api/price-history?ticker=' + encodeURIComponent(ticker) + '&period=' + encodeURIComponent(periodKey));
+    if (myReqId !== priceHistoryReqId) return;
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({error: 'Request failed'}));
+      if (summaryEl) summaryEl.innerHTML = '<span style="color:var(--red)">⚠ ' + (err.error || 'Failed to load price history') + '</span>';
+      return;
+    }
+    const ph = await r.json();
+    if (myReqId !== priceHistoryReqId) return;
+    if (ticker !== document.getElementById('ticker').value.trim().toUpperCase()) return;
+    currentPriceHistory = ph;
+    drawPriceChart(ph);
+  } catch (e) {
+    if (myReqId !== priceHistoryReqId) return;
+    if (summaryEl) summaryEl.innerHTML = '<span style="color:var(--red)">⚠ Network error loading price history</span>';
+  }
+}
+
+function fmtAxisDate(dt, periodKey) {
+  if (periodKey === '1mo' || periodKey === '3mo' || periodKey === '6mo') {
+    return dt.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  }
+  if (periodKey === 'ytd' || periodKey === '1y') {
+    return dt.toLocaleDateString('en-US', {month:'short'});
+  }
+  return dt.toLocaleDateString('en-US', {month:'short', year:'2-digit'});
+}
+
+function drawPriceChart(ph) {
+  ['chartLow','chartHigh','chartTicker','chartStartDate','chartEndDate'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  const canvas = document.getElementById('sparkline-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth || 800;
+  const H = 140;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const pts = (ph.points || []).filter(p => p.close != null);
+  const axisLabelsEl = document.getElementById('chartAxisLabels');
+  const summaryEl = document.getElementById('chartSummary');
+
+  if (!pts.length) {
+    if (summaryEl) summaryEl.innerHTML = '<span style="color:var(--yellow)">No historical data available for this range.</span>';
+    if (axisLabelsEl) axisLabelsEl.innerHTML = '';
+    return;
+  }
+
+  const closes = pts.map(p => p.close);
+  const costBasis = parseFloat(document.getElementById('costBasis')?.value) || 0;
+  let min = Math.min(...closes);
+  let max = Math.max(...closes);
+  if (costBasis > 0) { min = Math.min(min, costBasis); max = Math.max(max, costBasis); }
+  const range = (max - min) || 1;
+  const pad = 12;
+  const n = pts.length;
+  const x = i => pad + (n > 1 ? (i / (n-1)) * (W - 2*pad) : (W/2));
+  const y = v => H - pad - ((v - min) / range) * (H - 2*pad);
+
+  const lastClose = closes[closes.length-1];
+  const firstClose = closes[0];
+  const up = lastClose >= firstClose;
+  const color = up ? '#00e676' : '#ff1744';
+
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, up ? 'rgba(0,230,118,0.3)' : 'rgba(255,23,68,0.3)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(closes[0]));
+  for (let i = 1; i < n; i++) ctx.lineTo(x(i), y(closes[i]));
+  ctx.lineTo(x(n-1), H);
+  ctx.lineTo(x(0), H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(closes[0]));
+  for (let i = 1; i < n; i++) ctx.lineTo(x(i), y(closes[i]));
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(x(n-1), y(lastClose), 5, 0, Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  if (costBasis > 0) {
+    ctx.save();
+    ctx.setLineDash([4,3]);
+    ctx.strokeStyle = '#ffd54a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pad, y(costBasis));
+    ctx.lineTo(W - pad, y(costBasis));
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#ffd54a';
+    ctx.font = '10px sans-serif';
+    ctx.fillText('Avg Cost $' + costBasis.toFixed(2), pad + 2, y(costBasis) - 4);
+  }
+
+  if (axisLabelsEl) {
+    const labelCount = Math.min(5, n);
+    const idxs = [];
+    for (let k = 0; k < labelCount; k++) idxs.push(Math.round(k * (n - 1) / (labelCount - 1 || 1)));
+    const uniqueIdxs = [...new Set(idxs)];
+    axisLabelsEl.innerHTML = uniqueIdxs.map(i => `<span>${fmtAxisDate(new Date(pts[i].timestamp), ph.period)}</span>`).join('');
+  }
+
+  canvas.onmousemove = (evt) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = evt.clientX - rect.left;
+    let idx = Math.round(((mx - pad) / (W - 2*pad)) * (n - 1));
+    idx = Math.max(0, Math.min(n - 1, idx));
+    drawPriceChart(ph);
+    const px = x(idx);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, H);
+    ctx.stroke();
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(px, y(pts[idx].close), 4, 0, Math.PI*2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    showChartTooltip(pts[idx], mx, ph, idx);
+  };
+  canvas.onmouseleave = () => {
+    const tt = document.getElementById('chartTooltip');
+    if (tt) tt.style.display = 'none';
+    drawPriceChart(ph);
+  };
+
+  renderChartSummary(ph, pts, costBasis);
+}
+
+function showChartTooltip(pt, mx, ph, idx) {
+  const tt = document.getElementById('chartTooltip');
+  if (!tt) return;
+  const dt = new Date(pt.timestamp);
+  const dateStr = dt.toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'});
+  const prev = idx > 0 ? currentPriceHistory.points[idx-1] : null;
+  const chg = prev ? (pt.close - prev.close) : null;
+  const chgPct = prev && prev.close ? (chg / prev.close * 100) : null;
+  let html = `<div style="font-weight:700;margin-bottom:3px">${dateStr}</div>`;
+  if (pt.open != null) html += `Open: $${pt.open.toFixed(2)}<br>`;
+  if (pt.high != null) html += `High: $${pt.high.toFixed(2)}<br>`;
+  if (pt.low != null) html += `Low: $${pt.low.toFixed(2)}<br>`;
+  html += `Close: $${pt.close.toFixed(2)}<br>`;
+  if (pt.volume != null) html += `Vol: ${pt.volume.toLocaleString()}<br>`;
+  if (chg != null) {
+    const c = chg >= 0 ? 'var(--green)' : 'var(--red)';
+    html += `<span style="color:${c}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)</span>`;
+  }
+  tt.innerHTML = html;
+  tt.style.display = 'block';
+  const canvasW = document.getElementById('sparkline-canvas').offsetWidth;
+  tt.style.left = Math.min(mx + 10, canvasW - 130) + 'px';
+  tt.style.top = '4px';
+}
+
+function renderChartSummary(ph, pts, costBasis) {
+  const summaryEl = document.getElementById('chartSummary');
+  const avgCostEl = document.getElementById('avgCostSummary');
+  const s = ph.summary || {};
+  const startDt = new Date(pts[0].timestamp);
+  const endDt = new Date(pts[pts.length-1].timestamp);
+  const rangeLabelMap = {'1mo':'1M','3mo':'3M','6mo':'6M','ytd':'YTD','1y':'1Y','5y':'5Y','max':'MAX'};
+  const horizLabel = rangeLabelMap[ph.period] || ph.period;
+  const chgColor = (s.change ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div style="font-weight:700;color:var(--text)">${horizLabel} · Daily</div>
+      <div>${startDt.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})} – ${endDt.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}</div>
+      <div style="font-size:16px;font-weight:800;color:var(--text);margin-top:2px">$${(s.latest_price ?? pts[pts.length-1].close).toFixed(2)}</div>
+      <div style="color:${chgColor};font-weight:700">${(s.change ?? 0) >= 0 ? '+' : ''}$${(s.change ?? 0).toFixed(2)} · ${(s.change_percent ?? 0) >= 0 ? '+' : ''}${(s.change_percent ?? 0).toFixed(2)}%</div>
+      <div>High: $${(s.period_high ?? 0).toFixed(2)} &nbsp; Low: $${(s.period_low ?? 0).toFixed(2)}</div>
+      <div>Max drawdown: ${(s.maximum_drawdown_percent ?? 0).toFixed(1)}%</div>
+      <div style="opacity:.7">As of: ${ph.as_of ? new Date(ph.as_of).toLocaleString('en-US',{year:'numeric',month:'short',day:'numeric'}) : '—'} · Source: ${ph.source || 'market data provider'} · Interval: ${ph.actual_interval || '1d'}</div>`;
+  }
+  if (avgCostEl) {
+    if (costBasis > 0) {
+      const latest = s.latest_price ?? pts[pts.length-1].close;
+      const unrealizedPct = ((latest - costBasis) / costBasis) * 100;
+      const unrealizedAbs = latest - costBasis;
+      const col = unrealizedAbs >= 0 ? 'var(--green)' : 'var(--red)';
+      avgCostEl.innerHTML = `<span style="color:${col}">My Avg Cost $${costBasis.toFixed(2)} → ${unrealizedAbs >= 0 ? '+' : ''}$${unrealizedAbs.toFixed(2)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%) · price is ${latest >= costBasis ? 'above' : 'below'} your cost</span>`;
+    } else {
+      avgCostEl.innerHTML = '';
+    }
+  }
+}
+
+function onCostBasisChange() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  const val = parseFloat(document.getElementById('costBasis').value) || 0;
+  if (ticker) {
+    if (val > 0) localStorage.setItem(costBasisStorageKey(ticker), String(val));
+    else localStorage.removeItem(costBasisStorageKey(ticker));
+  }
+  if (currentPriceHistory) drawPriceChart(currentPriceHistory);
 }
 
 function showTab(name) {

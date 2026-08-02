@@ -137,6 +137,7 @@ def quick_data():
         sig  = compute_signal_summary(ind)
         algo = compute_algo_signals(df, ind)
         closes = df["Close"].tail(60).tolist()
+        dates = [d.strftime("%b %d") for d in df.index[-60:]]
         return jsonify({
             "ticker":         ticker,
             "company_name":   fund.get("longName", ticker),
@@ -148,6 +149,7 @@ def quick_data():
             "algo_signals":   algo,
             "news":           news,
             "sparkline":      [round(c, 2) for c in closes],
+            "sparkline_dates": dates,
             "fundamentals": {
                 "pe":             fund.get("trailingPE"),
                 "forward_pe":     fund.get("forwardPE"),
@@ -1015,6 +1017,104 @@ def track_hit_rate():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+PRICE_HISTORY_PERIODS = {"1mo", "3mo", "6mo", "ytd", "1y", "5y", "max"}
+
+
+@app.route("/api/price-history", methods=["GET"])
+def price_history_endpoint():
+    ticker = (request.args.get("ticker") or "").strip().upper()
+    period = (request.args.get("period") or "3mo").strip().lower()
+    if not ticker:
+        return jsonify({"error": "ticker is required"}), 400
+    if period not in PRICE_HISTORY_PERIODS:
+        return jsonify({
+            "error": "unsupported period '%s' - use one of %s" % (period, sorted(PRICE_HISTORY_PERIODS))
+        }), 400
+    try:
+        from tools.market_data import fetch_price_history
+        df = fetch_price_history(ticker, period)
+    except ValueError as exc:
+        return jsonify({"error": "no data for ticker '%s': %s" % (ticker, exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": "provider failure: %s" % exc}), 502
+
+    if df is None or df.empty:
+        return jsonify({"error": "no historical data available for %s" % ticker}), 404
+
+    df = df.sort_index()
+    df = df[~df.index.duplicated(keep="last")]
+
+    def _num(v):
+        try:
+            fv = float(v)
+            return fv if fv == fv else None
+        except (TypeError, ValueError):
+            return None
+
+    has_ohlc = all(c in df.columns for c in ("Open", "High", "Low"))
+    has_volume = "Volume" in df.columns
+
+    points = []
+    for ts, row in df.tail(2000).iterrows():
+        points.append({
+            "timestamp": ts.strftime("%Y-%m-%dT00:00:00"),
+            "open": _num(row["Open"]) if has_ohlc else None,
+            "high": _num(row["High"]) if has_ohlc else None,
+            "low": _num(row["Low"]) if has_ohlc else None,
+            "close": _num(row["Close"]),
+            "volume": int(row["Volume"]) if has_volume and row["Volume"] == row["Volume"] else None,
+        })
+    points = [p for p in points if p["close"] is not None]
+    if not points:
+        return jsonify({"error": "no usable closing prices for %s" % ticker}), 404
+
+    closes = [p["close"] for p in points]
+    start_price = closes[0]
+    latest_price = closes[-1]
+    change = latest_price - start_price
+    change_percent = (change / start_price * 100.0) if start_price else 0.0
+    highs = [p["high"] for p in points if p["high"] is not None] or closes
+    lows = [p["low"] for p in points if p["low"] is not None] or closes
+    period_high = max(highs)
+    period_low = min(lows)
+
+    running_max = closes[0]
+    max_drawdown = 0.0
+    for c in closes:
+        running_max = max(running_max, c)
+        if running_max:
+            dd = (c - running_max) / running_max * 100.0
+            max_drawdown = min(max_drawdown, dd)
+
+    provider_name = "market-data-provider"
+    try:
+        provider_name = df.attrs.get("provider", provider_name)
+    except Exception:
+        pass
+
+    return jsonify({
+        "ticker": ticker,
+        "period": period,
+        "requested_interval": "1d",
+        "actual_interval": "1d",
+        "timezone": "America/New_York",
+        "currency": "USD",
+        "source": provider_name,
+        "as_of": points[-1]["timestamp"],
+        "points": points,
+        "summary": {
+            "start_price": round(start_price, 4),
+            "latest_price": round(latest_price, 4),
+            "change": round(change, 4),
+            "change_percent": round(change_percent, 4),
+            "period_high": round(period_high, 4),
+            "period_low": round(period_low, 4),
+            "maximum_drawdown_percent": round(max_drawdown, 4),
+        },
+    })
+
 
 
 if __name__ == "__main__":
