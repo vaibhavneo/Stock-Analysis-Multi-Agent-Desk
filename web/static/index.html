@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Agent AI — 7-Agent Research Platform</title>
+<title>Stock Agent AI — 5-Agent Research Platform</title>
 <style>
   :root {
     --bg:       #080c14;
@@ -256,12 +256,12 @@
     <div class="logo-icon">📈</div>
     <div class="logo-text">
       <h1>STOCK AGENT AI</h1>
-      <p>7-Agent Research · Quant Signals · Social Intelligence</p>
+      <p>5-Agent Research · Quant Signals · Social Intelligence</p>
     </div>
   </div>
   <div class="badges">
     <div class="badge live">● LIVE</div>
-    <div class="badge agents">7 AI Agents</div>
+    <div class="badge agents">5 AI Agents</div>
     <div class="badge quant">Quant + Social</div>
   </div>
 </div>
@@ -392,10 +392,8 @@
   <div class="progress-steps" id="progressSteps">
     <div class="step" id="step-data">📡 Data</div>
     <div class="step" id="step-social_data">📱 Social Data</div>
-    <div class="step" id="step-research">📰 Research</div>
     <div class="step" id="step-fundamentals">📊 Fundamentals</div>
     <div class="step" id="step-technical">📈 Technical</div>
-    <div class="step" id="step-risk">⚠️ Risk</div>
     <div class="step" id="step-social">💬 Social Agent</div>
     <div class="step" id="step-algo">🔢 Algo</div>
     <div class="step" id="step-prediction">🎯 Prediction</div>
@@ -408,9 +406,8 @@
 <div class="main">
   <div class="empty-state" id="emptyState">
     <h2>AI-Powered Stock Intelligence</h2>
-    <p>7 specialist AI agents + quantitative models + social sentiment analysis</p>
+    <p>5 specialist AI agents + quantitative models + social sentiment analysis</p>
     <div class="feature-grid">
-      <div class="feature-card"><div class="icon">📰</div><h4>News & Research</h4><p>Web search, Yahoo Finance news, macro context</p></div>
       <div class="feature-card"><div class="icon">💬</div><h4>Social Sentiment</h4><p>Reddit (WSB, stocks, investing), StockTwits, financial forums</p></div>
       <div class="feature-card"><div class="icon">🔢</div><h4>Quant Algo</h4><p>Z-score, momentum, linear regression, Monte Carlo GBM</p></div>
       <div class="feature-card"><div class="icon">📊</div><h4>Fundamentals</h4><p>PE, EV/EBITDA, margins, growth, analyst targets</p></div>
@@ -704,18 +701,14 @@
       <div class="card">
         <div class="card-title">🤖 AI Agent Analysis</div>
         <div class="analysis-tabs">
-          <button class="tab-btn active" onclick="showTab('research')">📰 Research</button>
-          <button class="tab-btn" onclick="showTab('fundamentals')">📊 Fundamentals</button>
+          <button class="tab-btn active" onclick="showTab('fundamentals')">📊 Fundamentals</button>
           <button class="tab-btn" onclick="showTab('technical')">📈 Technical</button>
-          <button class="tab-btn" onclick="showTab('risk')">⚠️ Risk</button>
           <button class="tab-btn" onclick="showTab('social')">💬 Social</button>
           <button class="tab-btn" onclick="showTab('algo')">🔢 Algo</button>
           <button class="tab-btn" onclick="showTab('verdict')" id="btn-verdict" style="background:var(--accent2);border-color:var(--accent2);color:#fff;font-weight:700">🎯 Decision Brief</button>
         </div>
-        <div class="tab-content active" id="tab-research"><div class="analysis-text" id="text-research"><span class="muted">Waiting for analysis...</span></div></div>
-        <div class="tab-content" id="tab-fundamentals"><div class="analysis-text" id="text-fundamentals"><span class="muted">Waiting for analysis...</span></div></div>
+        <div class="tab-content active" id="tab-fundamentals"><div class="analysis-text" id="text-fundamentals"><span class="muted">Waiting for analysis...</span></div></div>
         <div class="tab-content" id="tab-technical"><div class="analysis-text" id="text-technical"><span class="muted">Waiting for analysis...</span></div></div>
-        <div class="tab-content" id="tab-risk"><div class="analysis-text" id="text-risk"><span class="muted">Waiting for analysis...</span></div></div>
         <div class="tab-content" id="tab-social"><div class="analysis-text" id="text-social"><span class="muted">Waiting for analysis...</span></div></div>
         <div class="tab-content" id="tab-algo"><div class="analysis-text" id="text-algo"><span class="muted">Waiting for analysis...</span></div></div>
         <div class="tab-content" id="tab-verdict"><div id="verdictTabContent"><span class="muted">Waiting for analysis...</span></div></div>
@@ -997,7 +990,7 @@ function _pfHoldingDetailHtml(b) {
         <div><span style="color:var(--muted)">Target/Max wt</span> <b>${b.target_weight_pct!=null?b.target_weight_pct.toFixed(1):'—'}% / ${b.max_weight_pct}%</b></div>
         <div><span style="color:var(--muted)">Review</span> <b>${b.review_note||'—'}</b></div>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:6px">Full seven-agent output: click the ticker to open the detailed analysis with all six agent tabs.</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Full five-agent output: click the ticker to open the detailed analysis with all four agent tabs.</div>
     </div>`;
 }
 
@@ -1159,7 +1152,7 @@ function hideKeyBanner() {
 
 window.addEventListener('load', () => setTimeout(checkStatus, 500));
 
-const STEPS = ['data','social_data','research','fundamentals','technical','risk','social','algo','prediction','grounding','recommendation'];
+const STEPS = ['data','social_data','fundamentals','technical','social','algo','prediction','grounding','recommendation'];
 
 function setStep(stage, done) {
   const el = document.getElementById('step-' + stage);
@@ -1207,7 +1200,7 @@ async function analyze() {
   });
   document.getElementById('verdictLoading').style.display = 'block';
   document.getElementById('verdictContent').style.display = 'none';
-  ['research','fundamentals','technical','risk','social','algo'].forEach(t => {
+  ['fundamentals','technical','social','algo'].forEach(t => {
     document.getElementById('text-' + t).innerHTML = '<span class="muted">Agent running...</span>';
   });
   document.getElementById('bullCase').textContent = '—';
@@ -1473,10 +1466,8 @@ function renderFullResult(r) {
 
   // Analysis texts
   const agentMap = {
-    research: r.research,
     fundamentals: r.fundamentals_analysis,
     technical: r.technical_analysis,
-    risk: r.risk_analysis,
     social: r.social_analysis,
     algo: r.algo_analysis,
   };
@@ -2838,7 +2829,7 @@ function renderDecisionReport(d) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         <!-- Agent scores -->
         <div>
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">7-Agent Scores</div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Pillar Scores</div>
           ${agentBars}
           <div style="margin-top:6px;font-size:10px">
             <span style="color:var(--muted)">Consensus:</span> ${cons.summary||'—'}

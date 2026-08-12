@@ -4,9 +4,9 @@ Guidance for Claude Code when working in this directory. This is a sub-project o
 
 ## What this is
 
-A 7-agent stock research and analysis tool, powered by DeepSeek (`deepseek-chat`, OpenAI-compatible API), with a single-page dark-themed dashboard at **http://localhost:5051**. It aggregates news, fundamentals, technicals, social sentiment, and quantitative signals, then has an LLM synthesize a final BUY/SELL/HOLD verdict.
+A 5-agent stock research and analysis tool (trimmed from an original 7 — `research` and `risk` LLM agents were removed as redundant/off-thesis for an investing, not trading, use case; the deterministic risk pillar in `agents/recommendation.py` already covers risk), powered by DeepSeek (OpenAI-compatible API), with a single-page dark-themed dashboard at **http://localhost:5051**. It aggregates fundamentals, technicals, social sentiment, and quantitative signals, then has an LLM synthesize a final BUY/SELL/HOLD verdict.
 
-**Status as of this writing (mid-upgrade):** the original 7-agent app is fully functional, but its final verdict's specific numbers (`entry_price`, `target_price`, `stop_loss`, `upside_pct`) are LLM-invented prose with no backtested grounding — see "Known limitation" below. A statistical-grounding upgrade is in progress; see `~/.claude/plans/memoized-dreaming-salamander.md` for the full plan and current phase status.
+**Status as of this writing (mid-upgrade):** the app is fully functional, but its final verdict's specific numbers (`entry_price`, `target_price`, `stop_loss`, `upside_pct`) are LLM-invented prose with no backtested grounding — see "Known limitation" below. A statistical-grounding upgrade is in progress; see `~/.claude/plans/memoized-dreaming-salamander.md` for the full plan and current phase status.
 
 ---
 
@@ -27,8 +27,8 @@ stock_agent/
 │
 ├── agents/
 │   ├── __init__.py          ← re-exports analyze_stock, run_prediction_agent
-│   ├── orchestrator.py      ← analyze_stock() — the single pipeline entry point, runs all 7 agents in sequence
-│   └── stock_agents.py      ← the 7 agent functions + PREDICTION_SCHEMA (the exact site of the "LLM invention" gap — see below)
+│   ├── orchestrator.py      ← analyze_stock() — the single pipeline entry point, runs all 5 agents in sequence
+│   └── stock_agents.py      ← the 5 agent functions + PREDICTION_SCHEMA (the exact site of the "LLM invention" gap — see below)
 │
 ├── backtest/                ← NEW, added mid-upgrade (statistical grounding project)
 │   ├── __init__.py          ← re-exports engine.py + strategies.py public API
@@ -76,21 +76,19 @@ All functions here are pure data-in/dict-or-DataFrame-out — no LLM calls happe
 
 ---
 
-## `agents/` — the 7-agent LLM pipeline
+## `agents/` — the 5-agent LLM pipeline
 
-All 7 agents call DeepSeek via `openai.OpenAI(base_url="https://api.deepseek.com")` — no Anthropic dependency in the core path (Anthropic is a documented optional fallback elsewhere in the workspace, not wired into this file specifically).
+All 5 agents call DeepSeek via `openai.OpenAI(base_url="https://api.deepseek.com")` — no Anthropic dependency in the core path (Anthropic is a documented optional fallback elsewhere in the workspace, not wired into this file specifically). `run_research_agent()` and `run_risk_agent()` were removed (trimmed for latency): research's news/macro sentiment skewed trading- rather than investing-flavored, and risk's prose duplicated the deterministic risk pillar already computed in `agents/recommendation.py`/`backtest/pillars.py`.
 
-1. `run_research_agent()` — news + sentiment + macro, free-text output
-2. `run_fundamentals_agent()` — valuation/growth/analyst consensus, free-text
-3. `run_technical_agent()` — price action + indicators, free-text (mentions entry/exit levels in prose, not structured)
-4. `run_risk_agent()` — volatility + company risk + position-sizing *language* (prose only, no computation — this is one of the gaps the backtest upgrade addresses)
-5. `run_social_agent()` — Reddit/StockTwits/forum mood, free-text
-6. `run_algo_agent()` — interprets the quant signals + Monte Carlo output in prose
-7. `run_prediction_agent()` — **the final synthesis call**. `PREDICTION_SCHEMA` (~line 343) defines the target JSON shape: `action`, `conviction`, `entry_price`, `target_price`, `stop_loss`, `upside_pct`, `downside_pct`, `risk_reward`, `scores`, plus prose fields (`summary`, `bull_case`, `bear_case`, `key_catalysts`).
+1. `run_fundamentals_agent()` — valuation/growth/analyst consensus, free-text
+2. `run_technical_agent()` — price action + indicators, free-text (mentions entry/exit levels in prose, not structured)
+3. `run_social_agent()` — Reddit/StockTwits/forum mood, free-text
+4. `run_algo_agent()` — interprets the quant signals + Monte Carlo output in prose
+5. `run_prediction_agent()` — **the final synthesis call**. `PREDICTION_SCHEMA` (~line 343) defines the target JSON shape: `action`, `conviction`, `entry_price`, `target_price`, `stop_loss`, `upside_pct`, `downside_pct`, `risk_reward`, `scores`, plus prose fields (`summary`, `bull_case`, `bear_case`, `key_catalysts`).
 
-**Known limitation (the reason for the backtest upgrade):** `run_prediction_agent()`'s prompt (~line 381) contains **zero numeric price data** beyond `current_price` — it hands the LLM six agents' prose summaries and asks it to invent specific dollar figures for entry/target/stop-loss "thinking in expected value, Sharpe ratios, and statistical edge," but nothing computes those; the LLM is inferring plausible-sounding numbers from text, not calculating them. This is being fixed by `backtest/` (Phases 0-2 done; Phase 5 will wrap `run_prediction_agent()`'s output with a new `agents/synthesis.py::ground_prediction()` that overrides these numeric fields with backtested values). **Do not present this system's current entry/target/stop-loss numbers as quantitatively grounded until Phase 5 lands.**
+**Known limitation (the reason for the backtest upgrade):** `run_prediction_agent()`'s prompt contains **zero numeric price data** beyond `current_price` — it hands the LLM four agents' prose summaries and asks it to invent specific dollar figures for entry/target/stop-loss "thinking in expected value, Sharpe ratios, and statistical edge," but nothing computes those; the LLM is inferring plausible-sounding numbers from text, not calculating them. This is being fixed by `backtest/` (Phases 0-2 done; Phase 5 will wrap `run_prediction_agent()`'s output with a new `agents/synthesis.py::ground_prediction()` that overrides these numeric fields with backtested values). **Do not present this system's current entry/target/stop-loss numbers as quantitatively grounded until Phase 5 lands.**
 
-`agents/orchestrator.py::analyze_stock()` is the single pipeline entry point — calls all 7 agents in sequence with a `progress()` callback (used by the SSE endpoint), returns one large result dict.
+`agents/orchestrator.py::analyze_stock()` is the single pipeline entry point — calls all 5 agents in sequence with a `progress()` callback (used by the SSE endpoint), returns one large result dict.
 
 ---
 
@@ -151,7 +149,7 @@ decision: [PRODUCTION_DATA_ACTIVATION_REPORT.md](PRODUCTION_DATA_ACTIVATION_REPO
 - `GET /` — serves `static/index.html`
 - `GET /api/status` — `{ok, key_set, key_preview, model}` — whether `DEEPSEEK_API_KEY` is loaded
 - `POST /api/quick` — fast, **no LLM call**: indicators + algo signals + news + sparkline, <2s, works with no API key at all
-- `POST /api/analyze/stream` — the full 7-agent pipeline via **Server-Sent Events**: emits `progress` events per agent stage (matching the UI's 9-step progress bar — data/social_data/research/fundamentals/technical/risk/social/algo/prediction), then a final `result` event, then `done`
+- `POST /api/analyze/stream` — the full 5-agent pipeline via **Server-Sent Events**: emits `progress` events per agent stage (matching the UI's progress bar — data/social_data/fundamentals/technical/social/algo/prediction/grounding/recommendation), then a final `result` event, then `done`
 
 `.env` is loaded from `stock_agent/.env` — tries `python-dotenv` first, falls back to manual line-by-line parsing if that package isn't installed (no hard dependency on `dotenv`).
 
@@ -222,6 +220,6 @@ pip3 install -r requirements.txt
 python3 web/app.py                        # → http://localhost:5051
 ```
 
-`/api/quick` works with no key at all (pure yfinance + math). The full 7-agent `/api/analyze/stream` pipeline needs the DeepSeek key.
+`/api/quick` works with no key at all (pure yfinance + math). The full 5-agent `/api/analyze/stream` pipeline needs the DeepSeek key.
 
 Run the backtest test suite: `python3 tests/test_backtest_engine.py && python3 tests/test_strategies.py`.

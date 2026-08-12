@@ -1,6 +1,6 @@
 """
 Stock Agent Specialists — powered by DeepSeek LLM (OpenAI-compatible API)
-7 specialist agents: Research, Fundamentals, Technical, Risk, Social, Algo, Prediction
+5 specialist agents: Fundamentals, Technical, Social, Algo, Prediction
 """
 from __future__ import annotations
 
@@ -45,57 +45,7 @@ def _fmt(data: dict) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 1. Research Agent
-# ══════════════════════════════════════════════════════════════════════════
-
-def run_research_agent(
-    client: OpenAI,
-    ticker: str,
-    company_name: str,
-    sector: str,
-    news: list[dict],
-    web_search_fn,
-    verbose: bool = False,
-) -> str:
-    web_results = ""
-    try:
-        web_results = web_search_fn(f"{company_name} {ticker} stock news outlook 2025", num_results=5)
-        macro = web_search_fn(f"{sector} sector outlook market conditions 2025", num_results=3)
-        web_results += "\n\n" + macro
-    except Exception:
-        pass
-
-    news_text = "\n".join(
-        f"- [{n['published']}] {n['title']} ({n['publisher']})"
-        for n in news
-    ) or "No recent news."
-
-    system = """You are a senior equity research analyst at a top investment bank.
-You synthesize news, macro conditions, and market sentiment into actionable insights.
-Be specific, data-driven, and flag key risks and catalysts."""
-
-    user = f"""Analyze news and market sentiment for {company_name} ({ticker}) in {sector}.
-
-RECENT NEWS:
-{news_text}
-
-WEB RESEARCH:
-{web_results[:3000]}
-
-Provide:
-1. **Sentiment Summary** — overall sentiment (positive/negative/mixed) with reasons
-2. **Key Catalysts** — upcoming events that could move the stock
-3. **Key Risks** — specific risks that could hurt performance
-4. **Macro Context** — how rates, economy, sector trends affect this stock
-5. **Sentiment Score** — rate 1-10 (10 = very bullish)
-
-Be concise and specific. 300 words max."""
-
-    return _call(client, system, user)
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 2. Fundamentals Agent
+# 1. Fundamentals Agent
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_fundamentals_agent(
@@ -136,7 +86,7 @@ Be specific with numbers. 300 words max."""
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 3. Technical Agent
+# 2. Technical Agent
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_technical_agent(
@@ -177,50 +127,7 @@ Give specific price levels. 300 words max."""
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 4. Risk Agent
-# ══════════════════════════════════════════════════════════════════════════
-
-def run_risk_agent(
-    client: OpenAI,
-    ticker: str,
-    fundamentals: dict,
-    indicators: dict,
-    research_summary: str,
-    verbose: bool = False,
-) -> str:
-    system = """You are a risk manager and portfolio strategist. Identify and
-quantify risks: market, company-specific, macro, liquidity.
-Size positions and define risk/reward ratios."""
-
-    user = f"""Assess the risk profile of {ticker}.
-
-KEY RISK METRICS:
-- Beta: {fundamentals.get('beta', 'N/A')}
-- ATR-14: {indicators.get('atr_14', 'N/A')}
-- Short Interest Ratio: {fundamentals.get('shortRatio', 'N/A')} days to cover
-- Total Debt: {fundamentals.get('totalDebt', 'N/A')}
-- Market Cap: {fundamentals.get('marketCap', 'N/A')}
-
-RESEARCH CONTEXT:
-{research_summary[:1000]}
-
-Assess:
-1. **Volatility Risk** — realistic daily/weekly range
-2. **Company-Specific Risks** — top 3 risks
-3. **Macro Risks** — economic/rate/geopolitical risks
-4. **Short Interest Risk** — squeeze risk or heavy shorting?
-5. **Downside Scenario** — what causes a 20-30% drop?
-6. **Risk/Reward** — current price risk:reward ratio
-7. **Position Sizing** — % of portfolio for aggressive/moderate/conservative
-8. **Risk Score** — rate 1-10 (10 = very high risk)
-
-Be quantitative. 300 words max."""
-
-    return _call(client, system, user)
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 5. Social Sentiment Agent
+# 3. Social Sentiment Agent
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_social_agent(
@@ -277,7 +184,7 @@ Analyze:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 6. Algo Trading Agent
+# 4. Algo Trading Agent
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_algo_agent(
@@ -339,7 +246,7 @@ Analyze:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 7. Prediction Agent — final BUY / SELL / HOLD
+# 5. Prediction Agent — final BUY / SELL / HOLD
 # ══════════════════════════════════════════════════════════════════════════
 
 PREDICTION_SCHEMA = {
@@ -358,7 +265,7 @@ PREDICTION_SCHEMA = {
     "bear_case":     "what could go wrong",
     "key_catalysts": ["catalyst 1", "catalyst 2"],
     "watch_levels":  {"support": "price", "resistance": "price"},
-    "scores": {"sentiment": 7, "fundamentals": 6, "technical": 5, "social": 6, "algo": 7, "overall": 6},
+    "scores": {"fundamentals": 6, "technical": 5, "social": 6, "algo": 7, "overall": 6},
 }
 
 
@@ -367,33 +274,25 @@ def run_prediction_agent(
     ticker: str,
     company_name: str,
     current_price: float,
-    research: str,
     fundamentals_analysis: str,
     technical_analysis: str,
-    risk_analysis: str,
     signal_summary: dict,
     social_analysis: str = "",
     algo_analysis: str = "",
     verbose: bool = False,
 ) -> dict:
     system = """You are the head of investment strategy at a hedge fund.
-Synthesize research, fundamentals, technicals, social sentiment, and quant signals
-into a precise, actionable trading decision.
+Synthesize fundamentals, technicals, social sentiment, and quant signals
+into a precise, actionable investing decision.
 Output ONLY valid JSON — no markdown fences, no prose, no explanation."""
 
-    user = f"""Generate a trading decision for {company_name} ({ticker}) at ${current_price:.2f}.
-
-RESEARCH & SENTIMENT:
-{research}
+    user = f"""Generate an investing decision for {company_name} ({ticker}) at ${current_price:.2f}.
 
 FUNDAMENTAL ANALYSIS:
 {fundamentals_analysis}
 
 TECHNICAL ANALYSIS:
 {technical_analysis}
-
-RISK ANALYSIS:
-{risk_analysis}
 
 SOCIAL SENTIMENT:
 {social_analysis}
