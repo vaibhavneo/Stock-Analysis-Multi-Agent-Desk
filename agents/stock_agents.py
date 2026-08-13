@@ -19,13 +19,20 @@ def _get_client(api_key: str) -> OpenAI:
     return OpenAI(
         api_key=api_key,
         base_url="https://api.deepseek.com",
-        timeout=45.0,
+        # deepseek-v4-pro reasons before it answers, and a measured call on this
+        # key took 115s. At the previous 45s every substantial agent timed out,
+        # retried, and still failed — which is what produced the empty
+        # completions behind "Could not generate prediction".
+        timeout=180.0,
         max_retries=1,
     )
 
 
 def _call(client: OpenAI, system: str, user: str,
-          model: str = "deepseek-v4-pro", max_tokens: int = 2000) -> str:
+          model: str = "deepseek-v4-pro", max_tokens: int = 8000) -> str:
+    # deepseek-v4-pro reasons before answering; reasoning tokens count against
+    # max_tokens. Too low a budget (was 2000) lets it exhaust the whole thing
+    # mid-thought (finish_reason="length") and return empty content.
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -307,7 +314,11 @@ Output ONLY valid JSON matching this schema exactly:
 
 Replace all placeholder strings with actual values. Use real numbers not strings for upside_pct, downside_pct, and scores."""
 
-    raw = _call(client, system, user, max_tokens=1500)
+    raw = _call(client, system, user)
+    if not raw or raw.startswith("[Agent error:"):
+        # DeepSeek occasionally returns an empty completion or a transient
+        # error; one retry clears most of these without masking real failures.
+        raw = _call(client, system, user)
 
     # Extract JSON from response
     m = re.search(r'\{.*\}', raw, re.DOTALL)
