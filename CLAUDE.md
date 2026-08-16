@@ -17,9 +17,12 @@ stock_agent/
 ├── CLAUDE.md              ← this file
 ├── requirements.txt       ← added mid-upgrade; captures previously-implicit deps + scipy
 ├── start.sh                ← convenience launcher (has a known bug, see below)
-├── .env                    ← DEEPSEEK_API_KEY=sk-... (gitignored, not committed)
+├── .gitignore               ← added alongside broker/ (this repo had NONE before — data/broker_tokens.json needed one, so did .env, see below)
+├── .env                    ← DEEPSEEK_API_KEY=sk-..., ROBINHOOD_CLIENT_ID=... — **actually committed to git** (confirmed via `git ls-files`; the "gitignored" claim that used to be here was wrong — there was no .gitignore in this repo until broker/ needed one). Rotating the DeepSeek key and scrubbing it from history is a real, still-open TODO, deliberately not done as a side effect of an unrelated feature.
 ├── .env.example             ← template for the above
-├── data/                    ← currently empty; reserved for the SQLite recommendation-tracking DB (planned Phase 4)
+├── data/                    ← recommendations.db (SQLite, also committed to git — same gap as .env above) + broker_tokens.json (gitignored now, OAuth tokens — see broker/)
+│
+├── broker/                  ← live Robinhood position sync (read-only). See "broker/" section below.
 │
 ├── tools/
 │   ├── __init__.py          ← re-exports the public API (explicit __all__ list — follow this convention for new public functions)
@@ -141,6 +144,63 @@ fixture path is unchanged (default). `xsection/health.py` (dataset health), `xse
 features PROVEN, Part B survivorship replay BLOCKED-needs-license). Full status + operator
 decision: [PRODUCTION_DATA_ACTIVATION_REPORT.md](PRODUCTION_DATA_ACTIVATION_REPORT.md). Tests:
 `python3 tests/test_xsection_production.py` (40 offline checks).
+
+---
+
+## `broker/` — live Robinhood position sync (read-only)
+
+Connects a real Robinhood account (stocks + crypto) to the app so the existing
+`/api/portfolio-brief` engine can produce a suggested-trades queue over real
+holdings, instead of only manually-entered ones. **Read-only by explicit user
+choice**: no order-placement code exists anywhere in this package, even
+though Robinhood's own MCP server supports it — see `tests/test_broker_no_trading.py`,
+which greps every call site in `broker/` on every run and fails the build if
+that ever changes.
+
+```
+broker/
+├── oauth.py                 ← PKCE + Dynamic Client Registration + token exchange/refresh (generic OAuth 2.1, Robinhood's real endpoints as defaults)
+├── mcp_client.py             ← hand-rolled JSON-RPC-over-HTTP MCP client (not the official `mcp` SDK — it needs Python >=3.10, this app is pinned to 3.9.18)
+├── token_store.py            ← durable token persistence; path from BROKER_TOKEN_DIR (a Railway volume in production, data/broker_tokens.json locally)
+├── keys.py                   ← env + .env fallback lookup, mirrors financial_data/keys.py
+├── register_client.py        ← one-time script: `python3 -m broker.register_client` — Dynamic Client Registration, prints ROBINHOOD_CLIENT_ID to save
+├── discover_tools.py         ← one-time, interactive script: completes a real OAuth login (in the user's own browser) and dumps the live tools/list — this is how broker/providers/robinhood.py's tool names were confirmed, not guessed
+└── providers/
+    └── robinhood.py          ← the ONLY file allowed to reference real Robinhood tool names. Calls exactly 3 (get_accounts, get_equity_positions, get_portfolio) of the 54 the server exposes.
+```
+
+**Robinhood's own account model matters here.** Discovery (M2) found the
+user's OAuth grant sees TWO accounts: their real default brokerage account
+(`agentic_allowed: false` — reads work, writes don't) and a separate, empty
+"Agentic" sub-account (`agentic_allowed: true`) — matching Robinhood's own
+"your agent trades in a dedicated account separate from the rest of your
+portfolio" framing on their `/agentic` page. `get_default_holdings()` picks
+the account by `is_default`, never by `agentic_allowed`, specifically so it
+doesn't silently show the empty sandbox account instead of the real one.
+
+**No dedicated crypto-positions tool exists** in this MCP server's tool set —
+Bitcoin/crypto shows up only as an aggregate `crypto_value` dollar figure via
+`get_portfolio`, not itemized per-coin. Surfaced honestly in the UI ("+$X in
+crypto — not itemized") rather than silently dropped.
+
+**Required env vars** (Railway + local `.env`, same convention as `DEEPSEEK_API_KEY`):
+- `ROBINHOOD_CLIENT_ID` — from running `broker/register_client.py` once (no client_secret — Robinhood's registration confirmed a public client, `token_endpoint_auth_method: "none"`)
+- `FLASK_SECRET_KEY` — signs the one-value Flask session used for the OAuth `state`/PKCE `code_verifier` round-trip (`/api/broker/connect` → `/api/broker/callback`); nothing else in this app uses sessions. **Must** be set on Railway (not left to the random-per-process fallback), since this app runs `gunicorn --workers 2` and a random key would make roughly half of all callback requests fail signature verification depending which worker handles which request.
+- `BROKER_TOKEN_DIR` — `/data` on Railway, pointing at a persistent volume provisioned for this purpose (the service's local filesystem is wiped on every redeploy, and a refresh token that doesn't survive that means re-authenticating via a real Robinhood browser click-through after every deploy). Falls back to `data/` locally with no volume needed.
+
+New Flask routes (`web/app.py`, right after `/api/portfolio-brief`):
+`GET /api/broker/status`, `GET /api/broker/connect`, `GET /api/broker/callback`,
+`POST /api/broker/disconnect`, `GET /api/broker/positions`. The frontend
+(`web/static/index.html`'s My Portfolio panel) POSTs whatever `/api/broker/positions`
+returns straight to the existing, unmodified `/api/portfolio-brief` — zero
+changes were needed to the recommendation/brief engine itself.
+
+Tests: `python3 tests/test_broker_oauth.py` (PKCE against the RFC 7636 test
+vector), `test_broker_mcp_client.py` (JSON-RPC framing + lifecycle handshake
++ session-id replay via `httpx.MockTransport`), `test_broker_robinhood.py`
+(response unwrapping, position normalization, is_default-not-agentic_allowed
+account selection — fixtures are the real shapes confirmed live, not
+guessed), `test_broker_no_trading.py` (the guard-rail above).
 
 ---
 

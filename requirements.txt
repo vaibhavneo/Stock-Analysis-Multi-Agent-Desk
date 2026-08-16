@@ -7,3 +7,4 @@ openai>=2.44
 python-dotenv>=1.0   # optional — app.py falls back to manual .env parsing if absent
 scipy>=1.10           # Kelly criterion + Deflated Sharpe Ratio (stock_agent/backtest/)
 gunicorn==21.2.0
+httpx>=0.27            # broker/ MCP client + OAuth (was only present transitively before)

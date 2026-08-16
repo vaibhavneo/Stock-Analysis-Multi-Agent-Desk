@@ -37,6 +37,16 @@ from backtest.strategies import STRATEGY_REGISTRY
 
 app = Flask(__name__, static_folder="static")
 
+# Only used for the broker OAuth connect/callback round-trip (one short-lived
+# {state, code_verifier} value per flask.session — see /api/broker/connect
+# below). Nothing else in this app uses sessions. Falls back to a per-process
+# random key when unset so local dev works without configuring it, at the
+# cost of every restart invalidating any in-flight connect attempt — fine
+# locally, but Railway MUST set a real FLASK_SECRET_KEY (see M0), since a
+# random-per-process key across two gunicorn workers would make roughly half
+# of all callback requests fail signature verification.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(32)
+
 
 def _get_api_key() -> str:
     return (
@@ -908,6 +918,106 @@ def portfolio_brief_endpoint():
 
         result = build_portfolio_brief(enriched, max_weight_pct=max_weight)
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Robinhood broker connection (read-only: positions in, nothing out) ─────
+#
+# No order-placement route exists here, deliberately — the user chose
+# "recommendations + a manual trade queue", not automatic execution, even
+# though Robinhood's own MCP server supports placing real orders. The
+# frontend still POSTs whatever /api/broker/positions returns straight to
+# the existing /api/portfolio-brief above — this section's only job is
+# getting real holdings into that exact {ticker, shares, avg_cost} shape.
+
+@app.route("/api/broker/status")
+def broker_status():
+    from broker import oauth
+    try:
+        token = None
+        connected = oauth.is_connected()
+        if connected:
+            from broker import token_store
+            token = token_store.load()
+        return jsonify({
+            "connected": connected,
+            "obtained_at": (token or {}).get("obtained_at"),
+            "expires_at": (token or {}).get("expires_at"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/broker/connect")
+def broker_connect():
+    from flask import redirect, session
+    from broker import oauth
+    from broker.keys import get_key, NotConfiguredError
+
+    try:
+        client_id = get_key("ROBINHOOD_CLIENT_ID", "broker_connect")
+    except NotConfiguredError as e:
+        return jsonify({"error": str(e)}), 503
+
+    code_verifier, code_challenge = oauth.generate_pkce_pair()
+    state = oauth.generate_state()
+    session["broker_oauth"] = {"state": state, "code_verifier": code_verifier}
+
+    redirect_uri = request.url_root.rstrip("/") + "/api/broker/callback"
+    authorize_url = oauth.build_authorize_url(client_id, redirect_uri, state, code_challenge)
+    return redirect(authorize_url)
+
+
+@app.route("/api/broker/callback")
+def broker_callback():
+    from flask import redirect, session
+    from broker import oauth
+
+    pending = session.pop("broker_oauth", None)
+    error = request.args.get("error")
+    code = request.args.get("code")
+    state = request.args.get("state")
+
+    if error:
+        return redirect(f"/?robinhood=error&msg={error}")
+    if not pending or state != pending.get("state"):
+        return redirect("/?robinhood=error&msg=state_mismatch")
+    if not code:
+        return redirect("/?robinhood=error&msg=no_code")
+
+    try:
+        redirect_uri = request.url_root.rstrip("/") + "/api/broker/callback"
+        oauth.complete_authorization(code, redirect_uri, pending["code_verifier"])
+    except Exception as e:
+        return redirect(f"/?robinhood=error&msg={e}")
+
+    return redirect("/?robinhood=connected")
+
+
+@app.route("/api/broker/disconnect", methods=["POST"])
+def broker_disconnect():
+    from broker import token_store
+    try:
+        token_store.clear()
+        return jsonify({"connected": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/broker/positions")
+def broker_positions():
+    from broker import oauth
+    from broker.providers.robinhood import get_default_holdings, RobinhoodError
+
+    if not oauth.is_connected():
+        return jsonify({"error": "not connected — visit /api/broker/connect first"}), 401
+    try:
+        return jsonify(get_default_holdings())
+    except oauth.NotConnectedError as e:
+        return jsonify({"error": str(e)}), 401
+    except RobinhoodError as e:
+        return jsonify({"error": str(e)}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

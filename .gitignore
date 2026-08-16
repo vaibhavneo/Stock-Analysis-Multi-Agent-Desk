@@ -1,0 +1,11 @@
+# OAuth tokens (broker/token_store.py's local-dev fallback path). Never
+# committed — these are as sensitive as the .env API keys, and this repo
+# never had a .gitignore before this file existed, which is exactly how
+# data/recommendations.db ended up tracked in git.
+data/broker_tokens.json
+
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.env

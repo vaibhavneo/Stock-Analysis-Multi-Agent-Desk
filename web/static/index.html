@@ -323,6 +323,19 @@
     <span style="font-size:10px;color:var(--muted)">Keyless — no API key. Saved in this browser only. Suggested actions, not automatic trades.</span>
   </div>
 
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+    <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Source</span>
+    <div style="display:flex;background:var(--bg3);border-radius:8px;padding:2px">
+      <button id="pfSrcManualBtn" onclick="setPortfolioSource('manual')"
+        style="border:none;background:none;color:var(--text);padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer">Manual</button>
+      <button id="pfSrcRobinhoodBtn" onclick="setPortfolioSource('robinhood')"
+        style="border:none;background:none;color:var(--text);padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer">🟢 Robinhood</button>
+    </div>
+    <button class="btn-analyze" id="pfRobinhoodBtn" onclick="robinhoodButtonClick()"
+      style="padding:8px 18px;font-size:13px;background:var(--bg3);color:var(--accent);border:1px solid var(--border)">🔗 Connect Robinhood</button>
+    <span id="pfRobinhoodStatus" style="font-size:11px;color:var(--muted)"></span>
+  </div>
+
   <div id="pfEmpty" style="text-align:center;color:var(--muted);font-size:13px;padding:16px 0">
     No holdings yet — add a ticker, share count, and your average cost above.
   </div>
@@ -820,14 +833,159 @@ let currentResult = null;
 // need one. Each holding gets a signal from /api/recommendation, the same
 // keyless 7-pillar engine "Quick Rec" uses — deterministic, no API key.
 const PF_KEY = 'stockAgentPortfolio';
+// Robinhood-synced holdings live in a separate key rather than merging into
+// PF_KEY — no existing reconciliation logic to lean on for merge-by-ticker,
+// and silently double-counting a manually-added position Robinhood also
+// reports would be worse than requiring an explicit source toggle.
+const PF_KEY_ROBINHOOD = 'stockAgentPortfolioRobinhood';
+const PF_SOURCE_KEY = 'stockAgentPortfolioSource';   // 'manual' | 'robinhood'
 
+function getPortfolioSource() {
+  return localStorage.getItem(PF_SOURCE_KEY) || 'manual';
+}
+
+function activePfKey() {
+  return getPortfolioSource() === 'robinhood' ? PF_KEY_ROBINHOOD : PF_KEY;
+}
+
+// Every portfolio function (renderPortfolioTable, analyzePortfolio,
+// buildPortfolioBrief, updatePortfolioTotals, addPortfolioHolding,
+// removePortfolioHolding) already goes through these two functions and
+// nothing else — making them source-aware is the entire integration point,
+// confirmed while building this rather than assumed.
 function loadPortfolio() {
-  try { return JSON.parse(localStorage.getItem(PF_KEY)) || []; }
+  try { return JSON.parse(localStorage.getItem(activePfKey())) || []; }
   catch (e) { return []; }
 }
 
 function savePortfolio(holdings) {
-  localStorage.setItem(PF_KEY, JSON.stringify(holdings));
+  localStorage.setItem(activePfKey(), JSON.stringify(holdings));
+}
+
+function setPortfolioSource(src) {
+  localStorage.setItem(PF_SOURCE_KEY, src);
+  renderSourceToggle();
+  renderPortfolioTable();
+}
+
+function renderSourceToggle() {
+  const src = getPortfolioSource();
+  const manualBtn = document.getElementById('pfSrcManualBtn');
+  const rhBtn = document.getElementById('pfSrcRobinhoodBtn');
+  if (!manualBtn || !rhBtn) return;
+  manualBtn.style.background = src === 'manual' ? 'var(--accent)' : 'none';
+  manualBtn.style.color = src === 'manual' ? '#000' : 'var(--text)';
+  rhBtn.style.background = src === 'robinhood' ? 'var(--accent)' : 'none';
+  rhBtn.style.color = src === 'robinhood' ? '#000' : 'var(--text)';
+}
+
+// ── Robinhood connection ────────────────────────────────────────────────
+// Read-only: this fetches positions and hands them to the SAME
+// /api/portfolio-brief endpoint the manual flow already uses. No order-
+// placement call exists anywhere in this app, even though Robinhood's own
+// MCP server supports it — recommendations + a manual trade queue only,
+// matching what was actually asked for.
+let _brokerConnected = false;
+
+async function checkBrokerStatus() {
+  try {
+    const r = await fetch(API_BASE + '/api/broker/status');
+    const s = await r.json();
+    _brokerConnected = !!s.connected;
+  } catch (e) {
+    _brokerConnected = false;
+  }
+  renderBrokerStatus();
+}
+
+function renderBrokerStatus() {
+  const btn = document.getElementById('pfRobinhoodBtn');
+  const status = document.getElementById('pfRobinhoodStatus');
+  if (!btn) return;
+  if (_brokerConnected) {
+    btn.textContent = '🔄 Sync Robinhood';
+    if (status) status.textContent = 'Connected — click to pull the latest positions.';
+  } else {
+    btn.textContent = '🔗 Connect Robinhood';
+    if (status) status.textContent = '';
+  }
+}
+
+function robinhoodButtonClick() {
+  if (_brokerConnected) { syncRobinhoodPositions(); }
+  else { window.location.href = API_BASE + '/api/broker/connect'; }
+}
+
+async function syncRobinhoodPositions() {
+  const btn = document.getElementById('pfRobinhoodBtn');
+  const status = document.getElementById('pfRobinhoodStatus');
+  btn.disabled = true;
+  const prevText = btn.textContent;
+  btn.textContent = '⏳ Syncing…';
+  try {
+    const r = await fetch(API_BASE + '/api/broker/positions');
+    const data = await r.json();
+    if (data.error) { alert('Robinhood sync failed: ' + data.error); return; }
+    const holdings = (data.holdings || []).map(h => ({
+      ticker: h.ticker, shares: h.shares, avgCost: h.avg_cost,
+      current: null, action: null, composite: null, conviction: null,
+    }));
+    localStorage.setItem(PF_KEY_ROBINHOOD, JSON.stringify(holdings));
+    setPortfolioSource('robinhood');
+    const extras = [];
+    if (data.crypto_value_usd) extras.push(`+$${data.crypto_value_usd.toFixed(2)} in crypto (not itemized — no per-coin tool available yet)`);
+    if (data.cash_usd != null) extras.push(`$${data.cash_usd.toFixed(2)} cash`);
+    if (status) status.textContent = `Synced ${holdings.length} position(s) from account ••••${(data.account_number||'').slice(-4)}.` + (extras.length ? ' ' + extras.join(' · ') : '');
+  } catch (e) {
+    alert('Robinhood sync failed: ' + e);
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === '⏳ Syncing…') btn.textContent = prevText;
+  }
+}
+
+// Own element, not #keyBanner: checkStatus() (unrelated — DeepSeek key
+// status) runs 500ms after load and calls hideKeyBanner() whenever the key
+// IS set, which would silently wipe a Robinhood banner sharing that same
+// element out from under the user before they could read it (caught live —
+// the banner appeared then vanished within half a second).
+function showRobinhoodBanner(msg) {
+  let b = document.getElementById('robinhoodBanner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'robinhoodBanner';
+    b.style.cssText = 'border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:12px;font-size:13px;';
+    document.body.insertBefore(b, document.body.children[1]);
+  }
+  b.innerHTML = msg;
+}
+
+function hideRobinhoodBanner() {
+  const b = document.getElementById('robinhoodBanner');
+  if (b) b.remove();
+}
+
+function handleBrokerRedirectBanner() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get('robinhood');
+  if (!status) return;
+  if (status === 'connected') {
+    showRobinhoodBanner(`
+      <span style="color:#69f0ae;font-size:18px">✅</span>
+      <span style="color:#a5d6a7"><b>Robinhood connected.</b> Open My Portfolio and click "Sync Robinhood" to pull your positions.</span>
+      <button onclick="hideRobinhoodBanner()" style="margin-left:auto;background:#69f0ae;border:none;color:#000;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700">Dismiss</button>
+    `);
+  } else if (status === 'error') {
+    const msg = params.get('msg') || 'unknown error';
+    showRobinhoodBanner(`
+      <span style="color:#ff9800;font-size:18px">⚠️</span>
+      <span style="color:#ffcc80"><b>Robinhood connection failed:</b> ${msg}</span>
+      <button onclick="hideRobinhoodBanner()" style="margin-left:auto;background:#ff9800;border:none;color:#000;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700">Dismiss</button>
+    `);
+  }
+  params.delete('robinhood'); params.delete('msg');
+  const qs = params.toString();
+  history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
 }
 
 function togglePortfolioCard() {
@@ -836,6 +994,8 @@ function togglePortfolioCard() {
   if (showing) { card.style.display = 'none'; return; }
   document.getElementById('emptyState').style.display = 'none';
   card.style.display = 'block';
+  renderSourceToggle();
+  checkBrokerStatus();
   renderPortfolioTable();
   card.scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -1151,6 +1311,16 @@ function hideKeyBanner() {
 }
 
 window.addEventListener('load', () => setTimeout(checkStatus, 500));
+window.addEventListener('load', handleBrokerRedirectBanner);
+window.addEventListener('load', () => {
+  // If the callback just landed and the portfolio card happens to already
+  // be open (unlikely on a fresh page load, but cheap to handle), reflect
+  // connected status immediately rather than waiting for the next toggle.
+  if (document.getElementById('portfolioCard').style.display !== 'none') {
+    renderSourceToggle();
+    checkBrokerStatus();
+  }
+});
 
 const STEPS = ['data','social_data','fundamentals','technical','social','algo','prediction','grounding','recommendation'];
 
