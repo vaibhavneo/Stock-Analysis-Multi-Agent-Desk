@@ -949,6 +949,24 @@ def broker_status():
         return jsonify({"error": str(e)}), 500
 
 
+def _broker_redirect_uri() -> str:
+    """The exact redirect_uri registered with Robinhood for this app
+    (broker/register_client.py). request.url_root's scheme can't be trusted
+    here: Railway terminates TLS at its edge and forwards to this container
+    over plain HTTP, so Flask sees every request as http:// regardless of
+    what the browser actually used — confirmed live, this produced an
+    authorize URL with redirect_uri=http://...railway.app/... which does
+    not exactly match the https:// URI registered with Robinhood and would
+    have failed the OAuth handshake outright. request.host reflects the
+    Host header the browser actually sent, which IS trustworthy here, so
+    scheme is derived from that instead: localhost stays http (matching
+    what was registered for local dev), everything else is forced https
+    (the only other registered redirect_uri)."""
+    host = request.host
+    scheme = "http" if host.startswith("localhost") or host.startswith("127.0.0.1") else "https"
+    return f"{scheme}://{host}/api/broker/callback"
+
+
 @app.route("/api/broker/connect")
 def broker_connect():
     from flask import redirect, session
@@ -964,7 +982,7 @@ def broker_connect():
     state = oauth.generate_state()
     session["broker_oauth"] = {"state": state, "code_verifier": code_verifier}
 
-    redirect_uri = request.url_root.rstrip("/") + "/api/broker/callback"
+    redirect_uri = _broker_redirect_uri()
     authorize_url = oauth.build_authorize_url(client_id, redirect_uri, state, code_challenge)
     return redirect(authorize_url)
 
@@ -987,7 +1005,7 @@ def broker_callback():
         return redirect("/?robinhood=error&msg=no_code")
 
     try:
-        redirect_uri = request.url_root.rstrip("/") + "/api/broker/callback"
+        redirect_uri = _broker_redirect_uri()
         oauth.complete_authorization(code, redirect_uri, pending["code_verifier"])
     except Exception as e:
         return redirect(f"/?robinhood=error&msg={e}")
