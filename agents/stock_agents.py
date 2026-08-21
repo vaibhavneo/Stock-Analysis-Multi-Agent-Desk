@@ -31,21 +31,40 @@ def _get_client(api_key: str) -> OpenAI:
 
 
 def _call(client: OpenAI, system: str, user: str,
-          model: str = "deepseek-v4-pro", max_tokens: int = 8000) -> str:
+          model: str = "deepseek-v4-pro", max_tokens: int = 8000,
+          response_format: dict | None = None) -> str:
     # deepseek-v4-pro reasons before answering; reasoning tokens count against
     # max_tokens. Too low a budget (was 2000) lets it exhaust the whole thing
     # mid-thought (finish_reason="length") and return empty content.
+    #
+    # response_format is built into kwargs only when truthy, so every caller
+    # that doesn't pass it (the 4 analysis agents) sees a byte-identical
+    # request body to before this param existed. Confirmed live 2026-08-21:
+    # deepseek-v4-pro honors response_format={"type": "json_object"}. If a
+    # future model/version rejects the param, one retry without it falls
+    # back to today's plain-text + regex-extraction behavior rather than
+    # hard-failing.
+    kwargs = dict(
+        model=model,
+        max_tokens=max_tokens,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
+        ],
+    )
+    if response_format:
+        kwargs["response_format"] = response_format
+
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
-        )
+        resp = client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
     except Exception as e:
+        if response_format:
+            try:
+                resp = client.chat.completions.create(**{k: v for k, v in kwargs.items() if k != "response_format"})
+                return resp.choices[0].message.content or ""
+            except Exception as e2:
+                return f"[Agent error: {e2}]"
         return f"[Agent error: {e}]"
 
 
@@ -413,7 +432,7 @@ def run_prediction_agent(
     # an empty/error response already did, instead of falling straight to
     # the hardcoded fallback below.
     for _attempt in range(2):
-        raw = _call(client, system, user)
+        raw = _call(client, system, user, response_format={"type": "json_object"})
         if not raw or raw.startswith("[Agent error:"):
             continue
         parsed = _parse_prediction_json(raw)
