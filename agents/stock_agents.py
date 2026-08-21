@@ -415,6 +415,7 @@ def run_prediction_agent(
     signal_summary: dict,
     social_analysis: str = "",
     algo_analysis: str = "",
+    self_critique: bool = False,
     verbose: bool = False,
 ) -> dict:
     system, user = _build_prediction_prompt(
@@ -440,6 +441,11 @@ def run_prediction_agent(
             continue
         validation = validate_prediction(parsed)
         if validation.valid:
+            if self_critique:
+                return _self_critique(
+                    client, parsed, fundamentals_analysis, technical_analysis,
+                    social_analysis, algo_analysis,
+                )
             return parsed
         # structurally invalid but syntactically valid JSON - retry once.
 
@@ -482,3 +488,85 @@ def _parse_prediction_json(raw: str) -> dict | None:
             return json.loads(cleaned)
         except Exception:
             return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Optional self-critique pass (run_prediction_agent's own internal 2nd call,
+# NOT a 6th agent - see the architecture-freeze note in run_prediction_agent
+# and STOCK_AGENT_V1.md §10). Opt-in, default off: this doubles the latency
+# and cost of the prediction stage, so it's the caller's decision, not a
+# silent default.
+# ══════════════════════════════════════════════════════════════════════════
+
+def _build_critique_prompt(
+    draft: dict,
+    fundamentals_analysis: str,
+    technical_analysis: str,
+    social_analysis: str,
+    algo_analysis: str,
+) -> tuple[str, str]:
+    system = """You are reviewing a draft investing decision for internal
+consistency against the source analyses it was built from. Check whether
+the draft's action and reasoning actually follow from what the FUNDAMENTAL,
+TECHNICAL, SOCIAL, and ALGO analyses argue - not whether you would have
+made the same call yourself.
+
+If the draft is consistent with its source analyses, respond with exactly
+the single word CONSISTENT and nothing else.
+
+If it is NOT consistent (for example it says BUY while the source analyses
+clearly argue bearish, or it cites numbers that contradict them), respond
+with ONLY a corrected JSON object matching the exact same schema as the
+draft - no markdown fences, no prose, no explanation outside the JSON."""
+
+    user = f"""DRAFT DECISION:
+{json.dumps(draft, indent=2)}
+
+FUNDAMENTAL ANALYSIS:
+{fundamentals_analysis}
+
+TECHNICAL ANALYSIS:
+{technical_analysis}
+
+SOCIAL SENTIMENT:
+{social_analysis}
+
+ALGO/QUANT SIGNALS:
+{algo_analysis}
+
+Is the draft decision consistent with these 4 analyses?"""
+
+    return system, user
+
+
+def _self_critique(
+    client: OpenAI,
+    draft: dict,
+    fundamentals_analysis: str,
+    technical_analysis: str,
+    social_analysis: str,
+    algo_analysis: str,
+) -> dict:
+    """One extra internal LLM call reviewing `draft` against its own source
+    analyses for internal consistency. Never lets a broken critique replace
+    a good draft - a revision is adopted only if it itself passes
+    validate_prediction(); anything else keeps the original draft, tagged
+    for transparency either way via the "self_critique" key.
+    """
+    system, user = _build_critique_prompt(
+        draft, fundamentals_analysis, technical_analysis, social_analysis, algo_analysis)
+    raw = _call(client, system, user)
+
+    if raw.strip().upper().startswith("CONSISTENT"):
+        result = dict(draft)
+        result["self_critique"] = "consistent"
+        return result
+
+    revised = _parse_prediction_json(raw)
+    if revised is not None and validate_prediction(revised).valid:
+        revised["self_critique"] = "revised"
+        return revised
+
+    result = dict(draft)
+    result["self_critique"] = "flagged_but_kept_original"
+    return result
