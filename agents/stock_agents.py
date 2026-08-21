@@ -14,6 +14,8 @@ try:
 except ImportError:
     raise ImportError("Run: pip3 install openai")
 
+from agents.prediction_schema import validate_prediction
+
 
 def _get_client(api_key: str) -> OpenAI:
     return OpenAI(
@@ -374,28 +376,31 @@ def run_prediction_agent(
         signal_summary, social_analysis, algo_analysis,
     )
 
-    raw = _call(client, system, user)
-    if not raw or raw.startswith("[Agent error:"):
-        # DeepSeek occasionally returns an empty completion or a transient
-        # error; one retry clears most of these without masking real failures.
+    raw = ""
+    parsed = None
+    validation = None
+    # Up to 2 attempts total (1 initial + 1 retry) - the same call budget as
+    # before, but now a structurally-invalid-JSON response (parses fine, but
+    # fails validate_prediction - e.g. action="Maybe") earns the same retry
+    # an empty/error response already did, instead of falling straight to
+    # the hardcoded fallback below.
+    for _attempt in range(2):
         raw = _call(client, system, user)
+        if not raw or raw.startswith("[Agent error:"):
+            continue
+        parsed = _parse_prediction_json(raw)
+        if parsed is None:
+            continue
+        validation = validate_prediction(parsed)
+        if validation.valid:
+            return parsed
+        # structurally invalid but syntactically valid JSON - retry once.
 
-    # Extract JSON from response
-    m = re.search(r'\{.*\}', raw, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group())
-        except json.JSONDecodeError:
-            # Try to clean common issues
-            cleaned = m.group().replace('\n', ' ').strip()
-            try:
-                return json.loads(cleaned)
-            except Exception:
-                pass
-
-    return {
+    fallback = {
         "action": "HOLD",
         "conviction": "LOW",
+        "time_horizon": "N/A",
+        "time_horizon_days": 0,
         "summary": raw[:500] if raw else "Could not generate prediction.",
         "bull_case": "—",
         "bear_case": "—",
@@ -406,5 +411,27 @@ def run_prediction_agent(
         "upside_pct": 0,
         "downside_pct": 0,
         "risk_reward": "N/A",
+        "watch_levels": {},
         "scores": {},
     }
+    if parsed is not None and validation is not None and not validation.valid:
+        # Diagnosable rather than opaque: the model DID return something
+        # JSON-shaped, it just didn't pass validation - keep why.
+        fallback["validation_errors"] = validation.errors
+    return fallback
+
+
+def _parse_prediction_json(raw: str) -> dict | None:
+    """Extract+parse a JSON object from a raw LLM response. None on failure."""
+    m = re.search(r'\{.*\}', raw, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group())
+    except json.JSONDecodeError:
+        # Try to clean common issues (stray embedded newlines).
+        cleaned = m.group().replace('\n', ' ').strip()
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            return None
