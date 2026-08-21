@@ -9,3 +9,10 @@ __pycache__/
 *.pyo
 .DS_Store
 .env
+
+# The live SQLite DB (and its WAL/SHM siblings) churns on every request and
+# was accidentally tracked before this file existed - stop tracking it, same
+# reasoning as data/broker_tokens.json above.
+data/recommendations.db
+data/recommendations.db-shm
+data/recommendations.db-wal
