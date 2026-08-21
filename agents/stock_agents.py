@@ -55,14 +55,12 @@ def _fmt(data: dict) -> str:
 # 1. Fundamentals Agent
 # ══════════════════════════════════════════════════════════════════════════
 
-def run_fundamentals_agent(
-    client: OpenAI,
+def _build_fundamentals_prompt(
     ticker: str,
     fundamentals: dict,
     earnings: dict,
     analyst_ratings: dict,
-    verbose: bool = False,
-) -> str:
+) -> tuple[str, str]:
     system = """You are a CFA-level fundamental analyst. Evaluate stocks on
 valuation multiples, earnings quality, growth trajectory, balance sheet health,
 and analyst consensus. Compare to sector norms and flag outliers."""
@@ -89,6 +87,18 @@ Analyze:
 
 Be specific with numbers. 300 words max."""
 
+    return system, user
+
+
+def run_fundamentals_agent(
+    client: OpenAI,
+    ticker: str,
+    fundamentals: dict,
+    earnings: dict,
+    analyst_ratings: dict,
+    verbose: bool = False,
+) -> str:
+    system, user = _build_fundamentals_prompt(ticker, fundamentals, earnings, analyst_ratings)
     return _call(client, system, user)
 
 
@@ -96,14 +106,12 @@ Be specific with numbers. 300 words max."""
 # 2. Technical Agent
 # ══════════════════════════════════════════════════════════════════════════
 
-def run_technical_agent(
-    client: OpenAI,
+def _build_technical_prompt(
     ticker: str,
     indicators: dict,
     signal_summary: dict,
     price_history_summary: str,
-    verbose: bool = False,
-) -> str:
+) -> tuple[str, str]:
     system = """You are an expert technical analyst with 20 years of experience.
 Read price action, trends, momentum, and volume to determine optimal
 entry and exit points. Set specific price targets and stop-losses."""
@@ -130,6 +138,18 @@ Analyze:
 
 Give specific price levels. 300 words max."""
 
+    return system, user
+
+
+def run_technical_agent(
+    client: OpenAI,
+    ticker: str,
+    indicators: dict,
+    signal_summary: dict,
+    price_history_summary: str,
+    verbose: bool = False,
+) -> str:
+    system, user = _build_technical_prompt(ticker, indicators, signal_summary, price_history_summary)
     return _call(client, system, user)
 
 
@@ -137,15 +157,13 @@ Give specific price levels. 300 words max."""
 # 3. Social Sentiment Agent
 # ══════════════════════════════════════════════════════════════════════════
 
-def run_social_agent(
-    client: OpenAI,
+def _build_social_prompt(
     ticker: str,
     company_name: str,
     reddit_data: dict,
     stocktwits_data: dict,
     web_forum_data: dict,
-    verbose: bool = False,
-) -> str:
+) -> tuple[str, str]:
     reddit_posts = "\n".join(
         f"- [r/{p['subreddit']}] {p['title']} (score:{p['score']}, comments:{p['comments']})"
         for p in reddit_data.get("posts", [])[:8]
@@ -187,6 +205,19 @@ Analyze:
 
 250 words max."""
 
+    return system, user
+
+
+def run_social_agent(
+    client: OpenAI,
+    ticker: str,
+    company_name: str,
+    reddit_data: dict,
+    stocktwits_data: dict,
+    web_forum_data: dict,
+    verbose: bool = False,
+) -> str:
+    system, user = _build_social_prompt(ticker, company_name, reddit_data, stocktwits_data, web_forum_data)
     return _call(client, system, user)
 
 
@@ -194,14 +225,12 @@ Analyze:
 # 4. Algo Trading Agent
 # ══════════════════════════════════════════════════════════════════════════
 
-def run_algo_agent(
-    client: OpenAI,
+def _build_algo_prompt(
     ticker: str,
     current_price: float,
     algo_signals: dict,
     indicators: dict,
-    verbose: bool = False,
-) -> str:
+) -> tuple[str, str]:
     mc = {k: v for k, v in algo_signals.items() if "mc_" in k}
     patterns = algo_signals.get("candlestick_patterns", [])
 
@@ -249,6 +278,18 @@ Analyze:
 
 300 words max."""
 
+    return system, user
+
+
+def run_algo_agent(
+    client: OpenAI,
+    ticker: str,
+    current_price: float,
+    algo_signals: dict,
+    indicators: dict,
+    verbose: bool = False,
+) -> str:
+    system, user = _build_algo_prompt(ticker, current_price, algo_signals, indicators)
     return _call(client, system, user)
 
 
@@ -276,8 +317,7 @@ PREDICTION_SCHEMA = {
 }
 
 
-def run_prediction_agent(
-    client: OpenAI,
+def _build_prediction_prompt(
     ticker: str,
     company_name: str,
     current_price: float,
@@ -286,8 +326,7 @@ def run_prediction_agent(
     signal_summary: dict,
     social_analysis: str = "",
     algo_analysis: str = "",
-    verbose: bool = False,
-) -> dict:
+) -> tuple[str, str]:
     system = """You are the head of investment strategy at a hedge fund.
 Synthesize fundamentals, technicals, social sentiment, and quant signals
 into a precise, actionable investing decision.
@@ -313,6 +352,27 @@ Output ONLY valid JSON matching this schema exactly:
 {json.dumps(PREDICTION_SCHEMA, indent=2)}
 
 Replace all placeholder strings with actual values. Use real numbers not strings for upside_pct, downside_pct, and scores."""
+
+    return system, user
+
+
+def run_prediction_agent(
+    client: OpenAI,
+    ticker: str,
+    company_name: str,
+    current_price: float,
+    fundamentals_analysis: str,
+    technical_analysis: str,
+    signal_summary: dict,
+    social_analysis: str = "",
+    algo_analysis: str = "",
+    verbose: bool = False,
+) -> dict:
+    system, user = _build_prediction_prompt(
+        ticker, company_name, current_price,
+        fundamentals_analysis, technical_analysis,
+        signal_summary, social_analysis, algo_analysis,
+    )
 
     raw = _call(client, system, user)
     if not raw or raw.startswith("[Agent error:"):
