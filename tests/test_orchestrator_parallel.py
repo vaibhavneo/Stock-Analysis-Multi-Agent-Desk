@@ -52,7 +52,7 @@ def _call_with_stubs(fundamentals_fn, technical_fn, social_fn, algo_fn):
             indicators={}, signal_summary={}, price_hist_summary="",
             company_name="Test Co", reddit_data={}, stocktwits_data={},
             web_forum_data={}, current_price=100.0, algo_signals={},
-            progress=_noop_progress,
+            pillars={}, progress=_noop_progress,
         )
 
 

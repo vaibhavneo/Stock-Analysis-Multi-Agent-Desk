@@ -33,6 +33,7 @@ from agents.stock_agents import (
     _get_client,
 )
 from agents.synthesis import ground_prediction
+from backtest.pillars import compute_pillar_scores
 from data.store import log_recommendation
 
 
@@ -72,6 +73,7 @@ def _run_analysis_agents(
     web_forum_data: dict,
     current_price: float,
     algo_signals: dict,
+    pillars: dict,
     progress: Callable[[str, str], None],
 ) -> dict:
     """Run the 4 independent analysis agents concurrently.
@@ -89,44 +91,53 @@ def _run_analysis_agents(
     can never take down the other 3 or the whole pipeline - matching (and
     slightly strengthening, since today an unexpected non-_call exception
     would propagate and abort the run) today's behavior.
+
+    `pillars` (from backtest.pillars.compute_pillar_scores, or {} if that
+    failed) grounds each agent's prose in the deterministic score for its
+    own domain - passed through as an extra kwarg, `{}` values simply
+    produce no pillar block (see agents.stock_agents._pillar_block).
     """
     tasks = {
         "fundamentals": (
             "Fundamentals agent: analyzing valuation...",
             run_fundamentals_agent,
             (ticker, fundamentals, earnings, analyst_ratings),
+            {"pillar": pillars.get("fundamentals")},
         ),
         "technical": (
             "Technical agent: reading price action & signals...",
             run_technical_agent,
             (ticker, indicators, signal_summary, price_hist_summary),
+            {"pillar": pillars.get("technical")},
         ),
         "social": (
             "Social agent: scanning Reddit, StockTwits & forums...",
             run_social_agent,
             (ticker, company_name, reddit_data, stocktwits_data, web_forum_data),
+            {"pillar": pillars.get("social")},
         ),
         "algo": (
             "Algo agent: running quantitative models...",
             run_algo_agent,
             (ticker, current_price, algo_signals, indicators),
+            {"pillar": pillars.get("algo")},
         ),
     }
 
-    for stage, (msg, _fn, _args) in tasks.items():
+    for stage, (msg, _fn, _args, _kwargs) in tasks.items():
         progress(stage, msg)
 
-    def _run_one(fn, args):
+    def _run_one(fn, args, kwargs):
         try:
-            return fn(_get_client(resolved_key), *args)
+            return fn(_get_client(resolved_key), *args, **kwargs)
         except Exception as e:
             return f"[Agent error: {e}]"
 
     results: dict = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
         future_to_stage = {
-            pool.submit(_run_one, fn, args): stage
-            for stage, (_msg, fn, args) in tasks.items()
+            pool.submit(_run_one, fn, args, kwargs): stage
+            for stage, (_msg, fn, args, kwargs) in tasks.items()
         }
         for future in as_completed(future_to_stage):
             stage = future_to_stage[future]
@@ -193,13 +204,29 @@ def analyze_stock(
     web_forum_data  = fetch_web_forum_sentiment(ticker, company_name)
     progress("social_data", f"Social: Reddit={reddit_data.get('mention_count', 0)} mentions, StockTwits={stocktwits_data.get('total', 0)} msgs")
 
+    # ── Deterministic pillar snapshot (for grounding the LLM prose below) ──
+    # Cheap, pure arithmetic - every input here is already fetched by this
+    # point. This is a non-strict (yfinance-fallback) snapshot used only to
+    # ground the 4 agents' prose; the recommendation engine below computes
+    # its own strict/EDGAR-sourced snapshot independently and unchanged, so
+    # only the fundamentals pillar can ever differ between the two (technical
+    # + algo, 80% of the core weight, are always identical either way).
+    try:
+        pillar_snapshot = compute_pillar_scores(
+            ticker, indicators, signal_summary, algo_signals, fundamentals,
+            reddit=reddit_data, stocktwits=stocktwits_data, strict_fundamentals=False,
+        )
+        pillars = pillar_snapshot.get("pillars", {})
+    except Exception:
+        pillars = {}
+
     # ── AI Agents ──────────────────────────────────────────────────────
     # The 4 analysis agents are mutually independent - run concurrently.
     analysis = _run_analysis_agents(
         resolved_key, ticker, fundamentals, earnings, analyst_ratings,
         indicators, signal_summary, price_hist_summary, company_name,
         reddit_data, stocktwits_data, web_forum_data, current_price,
-        algo_signals, progress,
+        algo_signals, pillars, progress,
     )
     fundamentals_analysis = analysis["fundamentals_analysis"]
     technical_analysis    = analysis["technical_analysis"]

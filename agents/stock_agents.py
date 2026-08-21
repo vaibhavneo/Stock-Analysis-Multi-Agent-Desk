@@ -53,6 +53,26 @@ def _fmt(data: dict) -> str:
     return json.dumps(data, indent=2, default=str)
 
 
+def _pillar_block(label: str, pillar: dict | None) -> str:
+    """Format the deterministic pillar score (backtest/pillars.py) for a
+    given domain as an appended prompt block, or "" if none was supplied.
+
+    This is grounding, not instruction: the agent isn't told what to
+    conclude, just given the number the system will actually act on, so
+    its prose can explain that number instead of independently inventing
+    a different one for the same domain.
+    """
+    if not pillar:
+        return ""
+    return (
+        f"\n\nDETERMINISTIC {label} PILLAR SCORE (this app's own quant scoring "
+        f"engine, not a guess): {pillar.get('score')}/100\n"
+        f"Formula: {pillar.get('formula')}\n"
+        f"This is the number the system will actually act on - your analysis "
+        f"should explain and be consistent with it, not silently contradict it."
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 1. Fundamentals Agent
 # ══════════════════════════════════════════════════════════════════════════
@@ -62,6 +82,7 @@ def _build_fundamentals_prompt(
     fundamentals: dict,
     earnings: dict,
     analyst_ratings: dict,
+    pillar: dict | None = None,
 ) -> tuple[str, str]:
     system = """You are a CFA-level fundamental analyst. Evaluate stocks on
 valuation multiples, earnings quality, growth trajectory, balance sheet health,
@@ -87,7 +108,7 @@ Analyze:
 6. **Fundamental Score** — rate 1-10
 7. **Fair Value Estimate** — rough intrinsic value range
 
-Be specific with numbers. 300 words max."""
+Be specific with numbers. 300 words max.{_pillar_block("FUNDAMENTALS", pillar)}"""
 
     return system, user
 
@@ -98,9 +119,10 @@ def run_fundamentals_agent(
     fundamentals: dict,
     earnings: dict,
     analyst_ratings: dict,
+    pillar: dict | None = None,
     verbose: bool = False,
 ) -> str:
-    system, user = _build_fundamentals_prompt(ticker, fundamentals, earnings, analyst_ratings)
+    system, user = _build_fundamentals_prompt(ticker, fundamentals, earnings, analyst_ratings, pillar)
     return _call(client, system, user)
 
 
@@ -113,6 +135,7 @@ def _build_technical_prompt(
     indicators: dict,
     signal_summary: dict,
     price_history_summary: str,
+    pillar: dict | None = None,
 ) -> tuple[str, str]:
     system = """You are an expert technical analyst with 20 years of experience.
 Read price action, trends, momentum, and volume to determine optimal
@@ -138,7 +161,7 @@ Analyze:
 6. **Exit Points** — price target(s) and stop-loss
 7. **Technical Score** — rate 1-10
 
-Give specific price levels. 300 words max."""
+Give specific price levels. 300 words max.{_pillar_block("TECHNICAL", pillar)}"""
 
     return system, user
 
@@ -149,9 +172,10 @@ def run_technical_agent(
     indicators: dict,
     signal_summary: dict,
     price_history_summary: str,
+    pillar: dict | None = None,
     verbose: bool = False,
 ) -> str:
-    system, user = _build_technical_prompt(ticker, indicators, signal_summary, price_history_summary)
+    system, user = _build_technical_prompt(ticker, indicators, signal_summary, price_history_summary, pillar)
     return _call(client, system, user)
 
 
@@ -165,6 +189,7 @@ def _build_social_prompt(
     reddit_data: dict,
     stocktwits_data: dict,
     web_forum_data: dict,
+    pillar: dict | None = None,
 ) -> tuple[str, str]:
     reddit_posts = "\n".join(
         f"- [r/{p['subreddit']}] {p['title']} (score:{p['score']}, comments:{p['comments']})"
@@ -205,7 +230,7 @@ Analyze:
 4. **Contrarian Signal** — extreme retail sentiment as contrarian indicator?
 5. **Social Score** — rate 1-10 (10 = very bullish crowd)
 
-250 words max."""
+250 words max.{_pillar_block("SOCIAL", pillar)}"""
 
     return system, user
 
@@ -217,9 +242,10 @@ def run_social_agent(
     reddit_data: dict,
     stocktwits_data: dict,
     web_forum_data: dict,
+    pillar: dict | None = None,
     verbose: bool = False,
 ) -> str:
-    system, user = _build_social_prompt(ticker, company_name, reddit_data, stocktwits_data, web_forum_data)
+    system, user = _build_social_prompt(ticker, company_name, reddit_data, stocktwits_data, web_forum_data, pillar)
     return _call(client, system, user)
 
 
@@ -232,6 +258,7 @@ def _build_algo_prompt(
     current_price: float,
     algo_signals: dict,
     indicators: dict,
+    pillar: dict | None = None,
 ) -> tuple[str, str]:
     mc = {k: v for k, v in algo_signals.items() if "mc_" in k}
     patterns = algo_signals.get("candlestick_patterns", [])
@@ -278,7 +305,7 @@ Analyze:
 5. **Optimal Strategy** — mathematically optimal approach?
 6. **Algo Score** — rate 1-10
 
-300 words max."""
+300 words max.{_pillar_block("ALGO", pillar)}"""
 
     return system, user
 
@@ -289,9 +316,10 @@ def run_algo_agent(
     current_price: float,
     algo_signals: dict,
     indicators: dict,
+    pillar: dict | None = None,
     verbose: bool = False,
 ) -> str:
-    system, user = _build_algo_prompt(ticker, current_price, algo_signals, indicators)
+    system, user = _build_algo_prompt(ticker, current_price, algo_signals, indicators, pillar)
     return _call(client, system, user)
 
 
