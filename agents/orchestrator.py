@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Callable
 
@@ -54,6 +55,90 @@ def _price_history_summary(df) -> str:
         f"Last 5 closes: {recent_closes}\n"
         f"Avg vol (20d): {df['Volume'].tail(20).mean():,.0f}"
     )
+
+
+def _run_analysis_agents(
+    resolved_key: str,
+    ticker: str,
+    fundamentals: dict,
+    earnings: dict,
+    analyst_ratings: dict,
+    indicators: dict,
+    signal_summary: dict,
+    price_hist_summary: str,
+    company_name: str,
+    reddit_data: dict,
+    stocktwits_data: dict,
+    web_forum_data: dict,
+    current_price: float,
+    algo_signals: dict,
+    progress: Callable[[str, str], None],
+) -> dict:
+    """Run the 4 independent analysis agents concurrently.
+
+    None of fundamentals/technical/social/algo depend on each other's output
+    - only the prediction agent (run separately afterward) depends on all 4 -
+    so running them on a thread pool cuts this stage's wall time roughly 4x
+    instead of summing 4 sequential ~15-100s DeepSeek calls.
+
+    Each task builds its own OpenAI client (cheap - no I/O happens at
+    construction) rather than sharing one across threads, which sidesteps any
+    question about client/httpx thread-safety entirely. A failure inside a
+    task is caught here and turned into the same "[Agent error: ...]" string
+    _call() already produces for an API-level failure, so one agent failing
+    can never take down the other 3 or the whole pipeline - matching (and
+    slightly strengthening, since today an unexpected non-_call exception
+    would propagate and abort the run) today's behavior.
+    """
+    tasks = {
+        "fundamentals": (
+            "Fundamentals agent: analyzing valuation...",
+            run_fundamentals_agent,
+            (ticker, fundamentals, earnings, analyst_ratings),
+        ),
+        "technical": (
+            "Technical agent: reading price action & signals...",
+            run_technical_agent,
+            (ticker, indicators, signal_summary, price_hist_summary),
+        ),
+        "social": (
+            "Social agent: scanning Reddit, StockTwits & forums...",
+            run_social_agent,
+            (ticker, company_name, reddit_data, stocktwits_data, web_forum_data),
+        ),
+        "algo": (
+            "Algo agent: running quantitative models...",
+            run_algo_agent,
+            (ticker, current_price, algo_signals, indicators),
+        ),
+    }
+
+    for stage, (msg, _fn, _args) in tasks.items():
+        progress(stage, msg)
+
+    def _run_one(fn, args):
+        try:
+            return fn(_get_client(resolved_key), *args)
+        except Exception as e:
+            return f"[Agent error: {e}]"
+
+    results: dict = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        future_to_stage = {
+            pool.submit(_run_one, fn, args): stage
+            for stage, (_msg, fn, args) in tasks.items()
+        }
+        for future in as_completed(future_to_stage):
+            stage = future_to_stage[future]
+            results[stage] = future.result()
+            progress(stage, f"{stage.capitalize()} agent: complete")
+
+    return {
+        "fundamentals_analysis": results["fundamentals"],
+        "technical_analysis":    results["technical"],
+        "social_analysis":       results["social"],
+        "algo_analysis":         results["algo"],
+    }
 
 
 def analyze_stock(
@@ -109,17 +194,17 @@ def analyze_stock(
     progress("social_data", f"Social: Reddit={reddit_data.get('mention_count', 0)} mentions, StockTwits={stocktwits_data.get('total', 0)} msgs")
 
     # ── AI Agents ──────────────────────────────────────────────────────
-    progress("fundamentals", "Fundamentals agent: analyzing valuation...")
-    fundamentals_analysis = run_fundamentals_agent(client, ticker, fundamentals, earnings, analyst_ratings)
-
-    progress("technical", "Technical agent: reading price action & signals...")
-    technical_analysis = run_technical_agent(client, ticker, indicators, signal_summary, price_hist_summary)
-
-    progress("social", "Social agent: scanning Reddit, StockTwits & forums...")
-    social_analysis = run_social_agent(client, ticker, company_name, reddit_data, stocktwits_data, web_forum_data)
-
-    progress("algo", "Algo agent: running quantitative models...")
-    algo_analysis = run_algo_agent(client, ticker, current_price, algo_signals, indicators)
+    # The 4 analysis agents are mutually independent - run concurrently.
+    analysis = _run_analysis_agents(
+        resolved_key, ticker, fundamentals, earnings, analyst_ratings,
+        indicators, signal_summary, price_hist_summary, company_name,
+        reddit_data, stocktwits_data, web_forum_data, current_price,
+        algo_signals, progress,
+    )
+    fundamentals_analysis = analysis["fundamentals_analysis"]
+    technical_analysis    = analysis["technical_analysis"]
+    social_analysis       = analysis["social_analysis"]
+    algo_analysis         = analysis["algo_analysis"]
 
     progress("prediction", "Prediction agent: generating final verdict...")
     prediction = run_prediction_agent(
