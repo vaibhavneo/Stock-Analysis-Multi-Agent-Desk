@@ -32,11 +32,29 @@ def synthesize_decision(
     prediction_summary: Optional[Dict[str, Any]] = None,
     orchestrator_result: Optional[Dict[str, Any]] = None,
     owns_position: bool = False,
+    regime: Optional[Dict[str, Any]] = None,
+    historical_context: Optional[Dict[str, Any]] = None,
+    analog: Optional[Dict[str, Any]] = None,
+    forecast: Optional[Dict[str, Any]] = None,
+    risk_profile: Optional[Dict[str, Any]] = None,
+    evidence: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Produce the complete structured decision report.
 
     Every input is an existing output dict from the Stock Agent. This function
-    does arithmetic and formatting only — no LLM calls, no new data fetches."""
+    does arithmetic and formatting only — no LLM calls, no new data fetches.
+
+    The six new keyword args (regime, historical_context, analog, forecast,
+    risk_profile, evidence) are the intelligence/ package's outputs - all
+    optional, all default None, and every existing caller that doesn't pass
+    them gets byte-identical output to before these existed. `evidence` is
+    intelligence/evidence_synthesis.py::build_evidence_ledger()'s result -
+    stored under report["evidence_ledger"], not report["evidence"] (that key
+    already means something different: claim ids from _collect_evidence()).
+    `regime` is the intelligence/regime.py market-wide regime dict - stored
+    under report["market_regime"], since report["regime"] already means the
+    recommendation's own per-ticker volatility regime string.
+    """
     ticker = ticker.upper().strip()
     rec = recommendation
     now = datetime.now().isoformat(timespec="seconds")
@@ -58,11 +76,18 @@ def synthesize_decision(
     xsec_interp = _interpret_xsec(ticker, xsec_ranking)
 
     # ── Bull/base/bear cases + catalysts + risks + thesis breakers ────────
-    scenarios = _build_scenarios(rec, orchestrator_result, agent_scores)
+    scenarios = _build_scenarios(rec, orchestrator_result, agent_scores, evidence)
 
     # ── Evidence & warnings ───────────────────────────────────────────────
-    evidence = _collect_evidence(rec)
-    warnings_list = _collect_warnings(rec, calibration_interp, backtest_interp, xsec_interp)
+    evidence_claims = _collect_evidence(rec)
+    warnings_list = _collect_warnings(rec, calibration_interp, backtest_interp, xsec_interp, evidence)
+
+    # ── Item 8: strongest evidence + what would change the call ───────────
+    # Deliberately computed AFTER everything above - "generated only after
+    # all evidence is assembled" (item 8's own wording).
+    strongest = _strongest_evidence(evidence)
+    would_change = _what_would_change_the_call(final_action, rec, evidence, risk_profile)
+    conviction = _conviction_from_evidence(evidence, rec)
 
     report: Dict[str, Any] = {
         "ticker": ticker,
@@ -96,12 +121,25 @@ def synthesize_decision(
         "position_size_gated": rec.get("position_size_gated"),
         "time_horizon_days": rec.get("time_horizon_days"),
 
-        "evidence": evidence,
+        "evidence": evidence_claims,
         "warnings": warnings_list,
 
         "honesty_flags": rec.get("honesty_flags", {}),
         "disclaimer": ("Composite decision report synthesized from computed outputs — "
                        "not financial advice. Numbers are historical, not predictive."),
+
+        # ── intelligence/ package outputs (all optional, all None by default -
+        # every existing caller that doesn't pass them sees these as None/empty,
+        # nothing else in the report changes shape or value). ────────────────
+        "market_regime": regime,
+        "historical_context": historical_context,
+        "analog": analog,
+        "forecast": forecast,
+        "risk_profile": risk_profile,
+        "evidence_ledger": evidence,
+        "conviction": conviction,
+        "strongest_evidence": strongest,
+        "what_would_change_the_call": would_change,
     }
     report["decision_fingerprint"] = _fingerprint(report)
     report["recommendation_fingerprint"] = rec.get("decision_fingerprint")
@@ -418,7 +456,8 @@ def _interpret_xsec(ticker: str,
 
 def _build_scenarios(rec: Dict[str, Any],
                      orch: Optional[Dict[str, Any]],
-                     agent_scores: Dict[str, Any]) -> Dict[str, Any]:
+                     agent_scores: Dict[str, Any],
+                     evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     levels = rec.get("levels") or {}
     current_price = rec.get("current_price", 0)
     # Levels may be present but carry null prices (e.g. ATR unavailable). Fall back
@@ -476,6 +515,18 @@ def _build_scenarios(rec: Dict[str, Any],
     if bt.get("dsr", 0) < 0.5:
         risks.append(f"Deflated Sharpe {bt.get('dsr', 0):.2f} < 0.5 — edge may be luck.")
 
+    # Item 4: named contradictions reduce conviction and are surfaced here,
+    # never silently absorbed into a single blended score. HIGH severity is a
+    # thesis breaker (a real reason to distrust the call outright); MEDIUM is
+    # a risk worth naming but not disqualifying.
+    if evidence:
+        for c in evidence.get("contradictions", []):
+            line = f"{c['description']}"
+            if c.get("severity") == "HIGH":
+                thesis_breakers.append(f"CONTRADICTION ({c['name']}): {line}")
+            else:
+                risks.append(f"Contradiction ({c['name']}): {line}")
+
     return {
         "bull_case": bull_case,
         "base_case": base_case,
@@ -501,7 +552,8 @@ def _collect_evidence(rec: Dict[str, Any]) -> Dict[str, Any]:
 def _collect_warnings(rec: Dict[str, Any],
                       cal: Dict[str, Any],
                       bt: Dict[str, Any],
-                      xsec: Dict[str, Any]) -> List[str]:
+                      xsec: Dict[str, Any],
+                      evidence: Optional[Dict[str, Any]] = None) -> List[str]:
     warnings_list = []
     flags = rec.get("honesty_flags", {})
 
@@ -525,7 +577,102 @@ def _collect_warnings(rec: Dict[str, Any],
     if rec.get("position_size_gated"):
         warnings_list.append("Position size gated to 0%: statistical edge not established.")
 
+    if evidence:
+        for c in evidence.get("contradictions", []):
+            if c.get("severity") == "HIGH":
+                warnings_list.append(f"Signal contradiction ({c['name'].replace('_', ' ')}): {c['description']}")
+
     return warnings_list
+
+
+# ── Item 8: strongest evidence, conviction, what would change the call ────
+# All three are pure readers of the evidence ledger (intelligence/
+# evidence_synthesis.py) and the existing recommendation dict - no new
+# scoring authority, no LLM call. Computed last, after every other section,
+# so they can reference the assembled evidence rather than pre-empting it.
+
+def _strongest_evidence(evidence: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The single strongest bullish and bearish item from the evidence
+    ledger, ranked by reliability * distance-from-neutral - the item that is
+    both confident AND extreme, not just the most extreme regardless of how
+    little it should be trusted. None (not fabricated) when there's no
+    evidence ledger or no item of that direction."""
+    if not evidence or not evidence.get("evidence"):
+        return {"bull": None, "bear": None}
+
+    def strength(item: Dict[str, Any]) -> float:
+        return (item.get("reliability") or 0.0) * abs((item.get("score") or 50) - 50)
+
+    bullish = [e for e in evidence["evidence"] if e.get("signal") == "bullish"]
+    bearish = [e for e in evidence["evidence"] if e.get("signal") == "bearish"]
+    strongest_bull = max(bullish, key=strength, default=None)
+    strongest_bear = max(bearish, key=strength, default=None)
+
+    return {
+        "bull": {"source": strongest_bull["source"], "score": strongest_bull["score"],
+                 "reliability": strongest_bull["reliability"]} if strongest_bull else None,
+        "bear": {"source": strongest_bear["source"], "score": strongest_bear["score"],
+                 "reliability": strongest_bear["reliability"]} if strongest_bear else None,
+    }
+
+
+def _what_would_change_the_call(final_action: str, rec: Dict[str, Any],
+                                evidence: Optional[Dict[str, Any]],
+                                risk_profile: Optional[Dict[str, Any]]) -> List[str]:
+    """Deterministic, explainable statements of what would flip or strengthen
+    the call - item 8's explicit requirement. Always non-empty: there is
+    always something that would need to change for a HIGH-conviction BUY
+    with zero contradictions to be even MORE clearly right, so this never
+    silently returns nothing to say."""
+    changes: List[str] = []
+    conf = rec.get("confidence", {}) or {}
+    stat_edge = (conf.get("statistical_edge") or {}).get("level")
+    data_level = (conf.get("data") or {}).get("level")
+
+    if final_action in ("HOLD", "SELL", "AVOID"):
+        if stat_edge != "HIGH":
+            changes.append("A proven statistical edge (walk-forward + PBO passing at HIGH confidence) "
+                           "would support a BUY.")
+        if data_level not in ("HIGH", "MEDIUM"):
+            changes.append("More reliable underlying data (currently LOW confidence or insufficient) "
+                           "would strengthen the case either way.")
+        if rec.get("risk_veto"):
+            changes.append("Volatility normalizing (the risk veto clearing) would remove a hard block on sizing.")
+
+    if evidence:
+        for c in evidence.get("contradictions", []):
+            changes.append(f"Resolving the '{c['name'].replace('_', ' ')}' contradiction "
+                           f"(currently {c['severity']}) would raise conviction.")
+
+    if risk_profile and (risk_profile.get("cost_basis") or {}).get("underwater"):
+        recovery = risk_profile["cost_basis"].get("recovery_required_pct")
+        if recovery is not None:
+            changes.append(f"The price recovering {recovery:.1f}% would return the position to breakeven.")
+
+    if not changes:
+        changes.append("No specific blocking condition identified — the current read is already well-supported "
+                       "by the available evidence.")
+
+    return changes
+
+
+def _conviction_from_evidence(evidence: Optional[Dict[str, Any]], rec: Dict[str, Any]) -> Optional[str]:
+    """LOW/MEDIUM/HIGH from the evidence ledger's conviction_multiplier
+    (itself reduced by named contradictions) combined with whether a
+    statistical edge is actually proven - a confident-sounding narrative
+    with no proven edge should never read as HIGH conviction. None (not a
+    default HIGH/MEDIUM) when no evidence ledger was supplied."""
+    if not evidence:
+        return None
+    multiplier = evidence.get("conviction_multiplier")
+    if multiplier is None:
+        return None
+    stat_proven = ((rec.get("confidence") or {}).get("statistical_edge") or {}).get("level") == "HIGH"
+    if multiplier >= 0.9 and stat_proven:
+        return "HIGH"
+    if multiplier >= 0.65:
+        return "MEDIUM"
+    return "LOW"
 
 
 # ── Fingerprint ───────────────────────────────────────────────────────────
