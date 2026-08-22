@@ -545,6 +545,30 @@
         calibration, and cross-sectional ranking. Fully keyless — no LLM needed.</div></div>
     </div>
 
+    <!-- AI Intelligence / Decision Engine (full width) -->
+    <div class="card" id="intelligenceCard" style="display:none;margin-bottom:16px">
+      <div class="card-title">🧠 AI Intelligence
+        <span style="float:right;font-weight:400;letter-spacing:0;text-transform:none">
+          <select id="intelSections" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px">
+            <option value="full">Full analysis</option>
+            <option value="valuation">Valuation only</option>
+            <option value="price_action">Why did it move?</option>
+            <option value="recovery">Recovery to cost</option>
+          </select>
+          <input id="intelAvgCost" type="number" step="0.01" placeholder="avg cost $"
+            style="width:90px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px">
+          <button onclick="fetchIntelligence()" id="intelBtn"
+            style="background:linear-gradient(90deg,var(--accent),var(--accent2));color:#04121b;border:none;border-radius:6px;padding:4px 14px;font-size:11px;font-weight:800;cursor:pointer">
+            🧠 Run Intelligence</button>
+        </span>
+      </div>
+      <div id="intelBody"><div style="color:var(--muted);text-align:center;padding:14px 0;font-size:13px">
+        Market regime, multi-horizon historical context, historical analogs, a probabilistic
+        forecast, risk/cost-basis analysis, and a reliability-weighted evidence ledger with
+        named contradictions — adaptive, only computes what the selected mode needs.
+        Fully keyless — no LLM needed.</div></div>
+    </div>
+
     <!-- Backtest Lab (full width) -->
     <div class="card" id="btLabCard" style="display:none;margin-bottom:16px">
       <div class="card-title">🧪 Backtest Lab
@@ -2363,6 +2387,7 @@ function showLabCards() {
   document.getElementById('xsecCard').style.display = 'block';
   document.getElementById('predLedgerCard').style.display = 'block';
   document.getElementById('decisionCard').style.display = 'block';
+  document.getElementById('intelligenceCard').style.display = 'block';
   loadUniverses();
   loadPredictionLedger();
   if (!_labStrategiesLoaded) {
@@ -3068,6 +3093,147 @@ function renderDecisionReport(d) {
       fingerprint <b>${(d.decision_fingerprint||'').slice(0,8)}</b>
       → rec <b>${(d.recommendation_fingerprint||'').slice(0,8)}</b>
       · ${d.disclaimer || ''}
+    </div>`;
+}
+
+// ── AI Intelligence (evidence-driven decision engine) ──────────────────────
+// Adaptive: /api/intelligence only computes the sections the selected mode
+// needs (item 10) - "Full analysis" runs everything, the other three modes
+// are deliberately cheaper. Renders the SAME Decision Report shape
+// renderDecisionReport() does, plus the new market_regime/historical_context/
+// analog/forecast/risk_profile/evidence_ledger/conviction sections.
+async function fetchIntelligence() {
+  const ticker = document.getElementById('ticker').value.trim().toUpperCase();
+  if (!ticker) { alert('Enter a ticker first'); return; }
+  const btn = document.getElementById('intelBtn');
+  const body = document.getElementById('intelBody');
+  const sections = document.getElementById('intelSections').value;
+  const avgCostRaw = document.getElementById('intelAvgCost').value.trim();
+  const avgCost = avgCostRaw ? Number(avgCostRaw) : null;
+  btn.disabled = true; btn.textContent = '⏳ thinking…';
+  body.innerHTML = '<div style="color:var(--accent);text-align:center;padding:14px 0;font-size:13px">Running the evidence-driven decision engine…</div>';
+  try {
+    const resp = await fetch('/api/intelligence', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker, sections, avg_cost: avgCost})});
+    const report = await resp.json();
+    if (report.error) body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${report.error}</div>`;
+    else renderIntelligenceCard(report);
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);text-align:center;padding:14px 0">${e}</div>`;
+  } finally { btn.disabled = false; btn.textContent = '🧠 Run Intelligence'; }
+}
+
+function renderIntelligenceCard(d) {
+  const body = document.getElementById('intelBody');
+  const f1 = v => v != null ? Number(v).toFixed(1) : '—';
+  const f2 = v => v != null ? Number(v).toFixed(2) : '—';
+  const pctSigned = v => v != null ? (v>=0?'+':'')+Number(v).toFixed(1)+'%' : '—';
+  const actionCol = {'BUY':'var(--green)','ACCUMULATE':'var(--green)','HOLD':'var(--yellow)',
+                     'SELL':'var(--red)','REDUCE':'var(--red)','AVOID':'var(--red)'};
+  const col = actionCol[d.final_action] || 'var(--yellow)';
+  const convCol = {'HIGH':'var(--green)','MEDIUM':'var(--yellow)','LOW':'var(--red)'};
+
+  // Market regime
+  const rg = d.market_regime;
+  const regimeBlock = rg && rg.risk_stance ? `
+    <div style="font-size:12px;line-height:1.8">
+      Trend <b>${rg.trend||'—'}</b> · Volatility <b>${rg.volatility_regime||'—'}</b>
+      (VIX ${f1(rg.vix_level)}) · Stance
+      <b style="color:${rg.risk_stance==='RISK_ON'?'var(--green)':rg.risk_stance==='RISK_OFF'?'var(--red)':'var(--yellow)'}">${rg.risk_stance}</b>
+      ${rg.growth_vs_value ? `· ${rg.growth_vs_value.replace('_',' ').toLowerCase()}` : ''}
+    </div>` : '<div style="font-size:12px;color:var(--muted)">Not computed in this mode.</div>';
+
+  // Prediction by horizon
+  const fc = d.forecast;
+  const horizonRows = fc && fc.horizons ? Object.entries(fc.horizons).map(([label, h]) => {
+    const pr = h.price_range || {};
+    const dirCol = h.direction==='UP'?'var(--green)':h.direction==='DOWN'?'var(--red)':'var(--yellow)';
+    return `<div style="display:grid;grid-template-columns:36px 50px 1fr;gap:6px;align-items:center;font-size:11px;padding:2px 0">
+      <span style="color:var(--muted)">${label}</span>
+      <span style="font-weight:700;color:${dirCol}">${(h.p_up*100).toFixed(0)}% up</span>
+      <span style="color:var(--muted)">${pr.data_available!==false && pr.bull_price!=null ?
+        `$${f2(pr.bear_price)} ← $${f2(pr.base_price)} → $${f2(pr.bull_price)}` : 'range n/a'}</span>
+    </div>`;
+  }).join('') : '<div style="font-size:12px;color:var(--muted)">Not computed in this mode.</div>';
+
+  // Bull/base/bear (existing scenario prose, reused)
+  const sc = d.scenarios || {};
+
+  // Signal agreement / conflict
+  const cons = d.consensus || {};
+  const contradictions = (d.evidence_ledger && d.evidence_ledger.contradictions) || [];
+  const contraBlock = contradictions.length ? contradictions.map(c =>
+    `<div style="font-size:11px;padding:2px 0;color:${c.severity==='HIGH'?'var(--red)':'var(--yellow)'}">
+      ⚠ ${c.severity} — ${c.description}</div>`).join('') :
+    '<div style="font-size:11px;color:var(--green)">No named contradictions detected.</div>';
+
+  // Risk
+  const rp = d.risk_profile || {};
+  const cb = rp.cost_basis;
+  const riskBlock = rp.confidence != null ? `
+    <div style="font-size:12px;line-height:1.8">
+      ${rp.drawdown_risk && rp.drawdown_risk.data_available ?
+        `Worst observed drawdown <b style="color:var(--red)">${f1(rp.drawdown_risk.worst_observed_drawdown_pct)}%</b> (${rp.drawdown_risk.worst_observed_window})<br>` : ''}
+      ${rp.levels && rp.levels.risk_reward_ratio != null ? `Risk/reward <b>${f2(rp.levels.risk_reward_ratio)}:1</b><br>` : ''}
+      ${cb ? `Cost basis: <b style="color:${cb.underwater?'var(--red)':'var(--green)'}">${pctSigned(cb.gain_loss_pct)}</b>
+        ${cb.underwater ? `· needs <b>+${f1(cb.recovery_required_pct)}%</b> to recover` : ''}` : ''}
+    </div>` : '<div style="font-size:12px;color:var(--muted)">Not computed in this mode.</div>';
+
+  // Confidence / conviction
+  const cf = d.confidence || {};
+  const conviction = d.conviction;
+
+  // Key evidence
+  const se = d.strongest_evidence || {};
+  const evidenceBlock = (se.bull || se.bear) ? `
+    ${se.bull ? `<div style="font-size:11px;color:var(--green);padding:2px 0">▲ Strongest bull: ${se.bull.source.replace('pillar:','')} (${f1(se.bull.score)}, reliability ${f2(se.bull.reliability)})</div>` : ''}
+    ${se.bear ? `<div style="font-size:11px;color:var(--red);padding:2px 0">▼ Strongest bear: ${se.bear.source.replace('pillar:','')} (${f1(se.bear.score)}, reliability ${f2(se.bear.reliability)})</div>` : ''}
+  ` : '<div style="font-size:11px;color:var(--muted)">Not computed in this mode.</div>';
+
+  const changeBlock = (d.what_would_change_the_call || []).map(t =>
+    `<div style="font-size:11px;color:var(--muted);padding:2px 0">→ ${t}</div>`).join('');
+
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:12px">
+      <div style="text-align:center">
+        <div style="font-size:13px;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:1px">${d.final_action}</div>
+        <div style="font-size:32px;font-weight:900;color:${col};line-height:1">${f1(d.composite_score)}</div>
+        <div style="font-size:9px;color:var(--muted)">composite</div>
+      </div>
+      ${conviction ? `<div style="text-align:center">
+        <div style="font-size:20px;font-weight:800;color:${convCol[conviction]||'var(--muted)'}">${conviction}</div>
+        <div style="font-size:9px;color:var(--muted)">conviction</div></div>` : ''}
+      <div style="flex:1;font-size:11px;color:var(--muted)">${d.action_rationale||''}
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">sections: ${(d.sections_computed||[]).join(', ')}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Market Regime</div>
+        ${regimeBlock}
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Prediction by Horizon</div>
+        ${horizonRows}
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Bull / Base / Bear</div>
+        <div style="font-size:11px;line-height:1.6">
+          <span style="color:var(--green)">Bull:</span> ${sc.bull_case||'—'}<br>
+          <span style="color:var(--yellow)">Base:</span> ${sc.base_case||'—'}<br>
+          <span style="color:var(--red)">Bear:</span> ${sc.bear_case||'—'}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Signal Agreement / Conflict</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${cons.summary||'—'}</div>
+        ${contraBlock}
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Risk</div>
+        ${riskBlock}
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Key Evidence</div>
+        ${evidenceBlock}
+      </div>
+    </div>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">What Would Change This Call</div>
+      ${changeBlock}
     </div>`;
 }
 

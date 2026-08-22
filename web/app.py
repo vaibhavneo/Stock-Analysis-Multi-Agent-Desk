@@ -824,9 +824,21 @@ def intelligence_endpoint():
         sections = plan_sections(requested_sections, has_position=owns_position)
         intel = run_selected(ticker, sections, avg_cost=avg_cost, shares=shares)
 
+        # The recommendation itself is always needed - synthesize_decision()
+        # is built around it. But the two enrichment steps are genuinely
+        # expensive (backtest_all races the whole strategy library;
+        # _gather_cheap_enrichments runs a cross-sectional ranking over an
+        # entire universe, which dominates this endpoint's latency), so they
+        # run only for the "full" preset. Skipping them for a narrow preset
+        # is the same adaptive principle plan_sections() applies to the
+        # intelligence modules - measured at ~80s vs ~10s on a live request.
         rec, df = _build_full_recommendation(ticker)
-        backtest_all = _build_backtest_all(ticker, df)
-        calibration, prediction_summary, xsec_ranking = _gather_cheap_enrichments(rec, ticker)
+        deep = "evidence" in sections and "analog" in sections
+        backtest_all = _build_backtest_all(ticker, df) if deep else None
+        if deep:
+            calibration, prediction_summary, xsec_ranking = _gather_cheap_enrichments(rec, ticker)
+        else:
+            calibration = prediction_summary = xsec_ranking = None
 
         report = synthesize_decision(
             ticker, rec,
