@@ -745,9 +745,8 @@ def _gather_cheap_enrichments(rec: dict, ticker: str):
     calibration = None
     prediction_summary = None
     try:
-        from data.prediction_ledger import PredictionLedger
-        pl = PredictionLedger()
-        calibration = pl.calibration_report(horizon_days=20)
+        from data import prediction_ledger as pl
+        calibration = pl.calibration_report(horizon=20)
         prediction_summary = pl.summary()
     except Exception:
         pass
@@ -884,9 +883,8 @@ def portfolio_brief_endpoint():
         # this per holding is what made a 13-name portfolio hang for minutes.
         shared_calibration = shared_prediction_summary = shared_xsec = None
         try:
-            from data.prediction_ledger import PredictionLedger
-            _pl = PredictionLedger()
-            shared_calibration = _pl.calibration_report(horizon_days=20)
+            from data import prediction_ledger as _pl
+            shared_calibration = _pl.calibration_report(horizon=20)
             shared_prediction_summary = _pl.summary()
         except Exception:
             pass
