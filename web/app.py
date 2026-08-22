@@ -794,6 +794,60 @@ def decision_report():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/intelligence", methods=["POST"])
+def intelligence_endpoint():
+    """Evidence-driven decision engine (the intelligence/ package): market
+    regime, multi-horizon historical context, historical analogs, a
+    probabilistic forecast, risk/cost-basis analysis, and a reliability-
+    weighted evidence ledger with named contradictions — folded into the
+    SAME Decision Report synthesize_decision() already produces for
+    /api/decision, not a second, competing action authority.
+
+    Adaptive (item 10): `sections` selects which of the 6 intelligence
+    blocks actually compute - a preset name ("valuation" | "full" |
+    "price_action" | "recovery"), an explicit list, or omitted (auto-
+    selects "recovery" when avg_cost is supplied, else "full"). Body:
+    {ticker, avg_cost?, shares?, sections?}."""
+    data = request.json or {}
+    ticker = data.get("ticker", "").upper().strip()
+    if not ticker:
+        return jsonify({"error": "No ticker"}), 400
+    avg_cost = data.get("avg_cost")
+    shares = data.get("shares")
+    requested_sections = data.get("sections")
+    owns_position = bool(avg_cost)
+
+    try:
+        from intelligence.orchestration import plan_sections, run_selected
+        from agents.decision_synthesis import synthesize_decision
+
+        sections = plan_sections(requested_sections, has_position=owns_position)
+        intel = run_selected(ticker, sections, avg_cost=avg_cost, shares=shares)
+
+        rec, df = _build_full_recommendation(ticker)
+        backtest_all = _build_backtest_all(ticker, df)
+        calibration, prediction_summary, xsec_ranking = _gather_cheap_enrichments(rec, ticker)
+
+        report = synthesize_decision(
+            ticker, rec,
+            backtest_all=backtest_all,
+            calibration=calibration,
+            xsec_ranking=xsec_ranking,
+            prediction_summary=prediction_summary,
+            owns_position=owns_position,
+            regime=intel.get("regime"),
+            historical_context=intel.get("historical_context"),
+            analog=intel.get("analog"),
+            forecast=intel.get("forecast"),
+            risk_profile=intel.get("risk_profile"),
+            evidence=intel.get("evidence"),
+        )
+        report["sections_computed"] = sections
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/decision-brief", methods=["POST"])
 def decision_brief_endpoint():
     """Decision Brief v2 — one 20-second-readable action from all existing outputs.
