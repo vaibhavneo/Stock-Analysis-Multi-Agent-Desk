@@ -92,6 +92,15 @@ def _fake_df():
                           "Volume": 1e6}, index=idx)
 
 
+def _fresh_fake_df():
+    """Same shape as _fake_df(), but the last bar is today - for proving the
+    staleness check (item 9) fires on genuinely old data and stays quiet on
+    current data, not just checking the flag exists in the abstract."""
+    idx = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=300)
+    return pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.0,
+                          "Volume": 1e6}, index=idx)
+
+
 def _fake_indicators(df):
     return {"current_price": 100.0}
 
@@ -178,6 +187,38 @@ def test_price_history_failure_degrades_honestly():
     check("flagged price_history_unavailable", "price_history_unavailable" in result["flags"])
 
 
+def test_stale_price_data_is_flagged_item_9():
+    """Item 9: 'reduce confidence explicitly when data is unavailable OR
+    STALE' - not just the unavailable half. A feed that's up but hasn't
+    moved (halted name, stalled provider) still returns a non-empty df, so
+    this has to be a genuine last-bar-age check, not inferred from emptiness."""
+    with patch("tools.market_data.fetch_price_history", return_value=_fake_df()), \
+         patch("tools.market_data.fetch_fundamentals", return_value={}), \
+         patch("tools.market_data.compute_indicators", side_effect=_fake_indicators), \
+         patch("tools.market_data.compute_signal_summary", side_effect=_fake_signal_summary), \
+         patch("tools.market_data.compute_algo_signals", side_effect=_fake_algo_signals), \
+         patch("backtest.pillars.compute_pillar_scores", side_effect=_fake_pillar_scores), \
+         patch("backtest.risk.compute_atr", return_value=2.0):
+        result = run_selected("TEST", ["historical_context"])
+    stale_flags = [f for f in result["flags"] if f.startswith("stale_price_data")]
+    check("a feed whose last bar is years old is flagged as stale (item 9)",
+          len(stale_flags) == 1, str(result["flags"]))
+
+
+def test_fresh_price_data_is_not_flagged_stale():
+    with patch("tools.market_data.fetch_price_history", return_value=_fresh_fake_df()), \
+         patch("tools.market_data.fetch_fundamentals", return_value={}), \
+         patch("tools.market_data.compute_indicators", side_effect=_fake_indicators), \
+         patch("tools.market_data.compute_signal_summary", side_effect=_fake_signal_summary), \
+         patch("tools.market_data.compute_algo_signals", side_effect=_fake_algo_signals), \
+         patch("backtest.pillars.compute_pillar_scores", side_effect=_fake_pillar_scores), \
+         patch("backtest.risk.compute_atr", return_value=2.0):
+        result = run_selected("TEST", ["historical_context"])
+    stale_flags = [f for f in result["flags"] if f.startswith("stale_price_data")]
+    check("a feed whose last bar is today is NOT flagged as stale (not over-triggering)",
+          len(stale_flags) == 0, str(result["flags"]))
+
+
 if __name__ == "__main__":
     test_preset_names_resolve_exactly()
     test_valuation_preset_is_the_cheap_one()
@@ -192,6 +233,8 @@ if __name__ == "__main__":
     test_full_preset_calls_every_module()
     test_recovery_preset_calls_only_its_three_modules()
     test_price_history_failure_degrades_honestly()
+    test_stale_price_data_is_flagged_item_9()
+    test_fresh_price_data_is_not_flagged_stale()
     print("\n" + "=" * 66)
     if FAILURES:
         print(f"{len(FAILURES)} FAILURE(S): {FAILURES}")

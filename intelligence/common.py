@@ -1,33 +1,22 @@
 """
 Shared helpers for the intelligence/ package.
 
-Mirrors backtest/pillars.py::_pillar()'s honesty pattern (a value paired with
-an honest confidence and explanatory flags) without being coupled to pillar
-scoring specifically - every new module in this package uses these so
-"never fabricate, always degrade explicitly on missing/stale data" (item 9)
-is consistent, not reinvented per module.
+Every module here follows the same honesty pattern backtest/pillars.py
+::_pillar() established (a value paired with an honest confidence and
+explanatory flags) so "never fabricate, always degrade explicitly on
+missing/stale data" (item 9) is consistent - but each module's own output is
+a compound, multi-field dict (a regime has trend/volatility/stance, a
+forecast has one entry per horizon, etc.), so each carries its own bare
+confidence/flags keys at the top level rather than every individual field
+being wrapped through a shared scalar helper. is_stale() below is the one
+piece of that pattern genuinely factored out, since staleness math is real
+logic worth writing once (see intelligence/orchestration.py's price-history
+staleness check, the one place a raw data timestamp - not a derived score -
+needs checking against "how old is too old").
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
-
-def confidence_flagged(value: Any, confidence: float, flags: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Wrap a computed value with an honest confidence in [0,1] and any flags
-    explaining why confidence isn't 1.0 (missing inputs, stale data, thin
-    sample size, etc.).
-
-    `value` may be None when there's genuinely nothing to report - the
-    caller must still supply a confidence (0.0 for "nothing computed") and
-    must never fabricate a plausible-looking number instead of admitting
-    that.
-    """
-    return {
-        "value": value,
-        "confidence": round(max(0.0, min(1.0, confidence)), 2),
-        "flags": list(flags or []),
-    }
 
 
 def is_stale(as_of_iso: str, max_age_days: int) -> bool:

@@ -1,7 +1,19 @@
 """
-Verification for intelligence/common.py's shared honesty-pattern helpers.
+Verification for intelligence/common.py's is_stale() helper.
 
 Run: python3 tests/test_intelligence_common.py
+
+(This file used to also cover confidence_flagged(), a scalar-wrapping
+helper that was removed: an audit of every new symbol from this session
+found it had zero callers anywhere, including within the intelligence/
+package itself - every module's actual output turned out to be a compound,
+multi-field dict rather than a single wrapped scalar, so the helper never
+fit any real use case. Rather than leave tested-but-unused code with a
+docstring falsely claiming universal adoption, it was deleted; see
+intelligence/common.py's module docstring for the corrected account. This
+file's history is worth keeping in mind as a caution: a "shared helper"
+built ahead of a concrete call site is a guess, and this session's own guess
+was wrong.)
 """
 import sys
 from datetime import datetime, timedelta, timezone
@@ -9,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from intelligence.common import confidence_flagged, is_stale
+from intelligence.common import is_stale
 
 FAILURES = []
 
@@ -18,26 +30,6 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
-def test_confidence_flagged_shape():
-    r = confidence_flagged(42.0, 0.8, ["some_flag"])
-    check("value passes through", r["value"] == 42.0)
-    check("confidence rounds to 2dp", r["confidence"] == 0.8)
-    check("flags list passes through", r["flags"] == ["some_flag"])
-
-
-def test_confidence_flagged_clamps_range():
-    r_hi = confidence_flagged(1, 5.0)
-    r_lo = confidence_flagged(1, -3.0)
-    check("confidence above 1.0 clamps to 1.0", r_hi["confidence"] == 1.0)
-    check("confidence below 0.0 clamps to 0.0", r_lo["confidence"] == 0.0)
-
-
-def test_confidence_flagged_defaults_flags_to_empty_list():
-    r = confidence_flagged(None, 0.0)
-    check("value may be None (no fabrication)", r["value"] is None)
-    check("flags defaults to an empty list, not None", r["flags"] == [])
 
 
 def test_is_stale_recent_is_not_stale():
@@ -55,6 +47,14 @@ def test_is_stale_handles_naive_datetime():
     check("a naive (no-tz) recent timestamp is not stale", is_stale(naive, max_age_days=5) is False)
 
 
+def test_is_stale_boundary_is_strictly_greater_than():
+    exactly_at_limit = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    check("a timestamp exactly at max_age_days is NOT stale (boundary is strictly >, not >=)",
+          is_stale(exactly_at_limit, max_age_days=5) is False)
+    just_over = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+    check("one day past the boundary IS stale", is_stale(just_over, max_age_days=5) is True)
+
+
 def test_is_stale_never_raises_on_garbage():
     for garbage in (None, "", "not-a-date", 12345, "2024-13-99"):
         try:
@@ -66,12 +66,10 @@ def test_is_stale_never_raises_on_garbage():
 
 
 if __name__ == "__main__":
-    test_confidence_flagged_shape()
-    test_confidence_flagged_clamps_range()
-    test_confidence_flagged_defaults_flags_to_empty_list()
     test_is_stale_recent_is_not_stale()
     test_is_stale_old_is_stale()
     test_is_stale_handles_naive_datetime()
+    test_is_stale_boundary_is_strictly_greater_than()
     test_is_stale_never_raises_on_garbage()
     print("\n" + "=" * 66)
     if FAILURES:

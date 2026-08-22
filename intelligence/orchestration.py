@@ -110,6 +110,7 @@ def run_selected(
     from backtest.pillars import compute_pillar_scores
     from backtest.risk import compute_atr
     from financial_data import get_bars_df
+    from intelligence.common import is_stale
 
     ticker = ticker.upper().strip()
     flags: List[str] = []
@@ -121,6 +122,16 @@ def run_selected(
     if df is None or df.empty:
         return {"ticker": ticker, "sections": sections, "current_price": None,
                 "confidence": 0.0, "flags": ["price_history_unavailable"]}
+
+    # Item 9's "reduce confidence explicitly when data is stale" half, not
+    # just "unavailable": a feed that's up but hasn't updated (a halted or
+    # thinly-traded name, a stalled provider) still returns a non-empty df,
+    # so emptiness alone can't catch it. 5 calendar days comfortably covers
+    # weekends+holidays for an actively-traded name without false-flagging
+    # every Monday morning; anything older is a real signal worth surfacing,
+    # not silently trusting a chart that stopped moving.
+    if is_stale(df.index[-1].isoformat(), max_age_days=5):
+        flags.append(f"stale_price_data_last_bar_{df.index[-1].date()}")
 
     indicators = compute_indicators(df)
     signal_summary = compute_signal_summary(indicators)
