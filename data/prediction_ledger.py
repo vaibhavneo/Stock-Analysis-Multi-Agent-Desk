@@ -35,7 +35,15 @@ from typing import Any, Callable, Dict, List, Optional
 
 from data import store
 
-HORIZONS = (1, 5, 20, 60, 252)          # trading days
+HORIZONS = (1, 5, 20, 60, 126, 252)     # trading days - 126 (6mo) added for the
+                                         # intelligence/ prediction engine's 5
+                                         # forecast horizons (1wk/1mo/3mo/6mo/1yr).
+                                         # 20/60 are NOT renamed to 21/63 to match
+                                         # momentum-period naming elsewhere - that
+                                         # would orphan every existing outcome row
+                                         # at those horizons and break the default
+                                         # horizon=20 used throughout this module
+                                         # and by web/app.py's calibration routes.
 DEFAULT_BENCHMARK = "SPY"
 
 _db_override: Optional[str] = None
@@ -78,6 +86,7 @@ CREATE TABLE IF NOT EXISTS prediction_snapshots (
     regime             TEXT,
     benchmark          TEXT,
     replay_run_id      TEXT,        -- NULL = live prediction; set = historical replay
+    horizon_probabilities_json TEXT, -- {horizon_days: p_up}; NULL for pre-existing rows
     frozen_json        TEXT NOT NULL,
     content_hash       TEXT NOT NULL
 );
@@ -124,6 +133,11 @@ def _conn() -> sqlite3.Connection:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(prediction_snapshots)")}
     if "replay_run_id" not in cols:
         conn.execute("ALTER TABLE prediction_snapshots ADD COLUMN replay_run_id TEXT")
+    # Additive column for intelligence/prediction_engine.py's per-horizon
+    # probabilities - same proven migration shape as replay_run_id above.
+    # Does not touch the immutability triggers or any existing row.
+    if "horizon_probabilities_json" not in cols:
+        conn.execute("ALTER TABLE prediction_snapshots ADD COLUMN horizon_probabilities_json TEXT")
     conn.commit()
     return conn
 
@@ -172,6 +186,10 @@ def freeze_prediction(rec: Dict[str, Any]) -> Optional[str]:
             "position_size_pct": rec.get("position_size_pct"),
             "replay_run_id": rec.get("replay_run_id"),
             "replay_meta": rec.get("replay_meta"),   # coverage/missing/exclusions (frozen, immutable)
+            # Optional: {horizon_days: p_up}, populated only by callers that opt
+            # into intelligence/prediction_engine.py's per-horizon forecast.
+            # Absent (None) for every existing caller - byte-identical behavior.
+            "horizon_probabilities": rec.get("horizon_probabilities"),
         }
         sid = _content_hash(frozen)
         content_hash = _content_hash({k: v for k, v in frozen.items() if k != "created_at"})
@@ -188,8 +206,8 @@ def freeze_prediction(rec: Dict[str, Any]) -> Optional[str]:
                     conf_allocation, edge_score, position_size_pct, pillars_json, gates_json,
                     evidence_ids_json, strategy_version, data_timestamps_json,
                     decision_fingerprint, sector, regime, benchmark, replay_run_id,
-                    frozen_json, content_hash)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    horizon_probabilities_json, frozen_json, content_hash)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sid, frozen["created_at"], frozen["ticker"], frozen["price_at_call"],
                  frozen["action"], frozen["horizon_days"], frozen["expected_return_pct"],
                  frozen["confidence"].get("thesis"), frozen["confidence"].get("data"),
@@ -200,6 +218,7 @@ def freeze_prediction(rec: Dict[str, Any]) -> Optional[str]:
                  frozen["strategy_version"], json.dumps(frozen["data_timestamps"]),
                  frozen["decision_fingerprint"], frozen["sector"], frozen["regime"],
                  frozen["benchmark"], frozen["replay_run_id"],
+                 json.dumps(frozen["horizon_probabilities"]) if frozen["horizon_probabilities"] else None,
                  json.dumps(frozen, default=str), content_hash))
             conn.commit()
             return sid
@@ -249,7 +268,8 @@ def list_snapshots(ticker: Optional[str] = None, limit: int = 500) -> List[Dict[
 
 def evaluate_outcomes(price_at_call_date: str, action: str, prices, benchmark,
                       edge_score: Optional[float] = None,
-                      horizons=HORIZONS) -> Dict[int, Dict[str, Any]]:
+                      horizons=HORIZONS,
+                      horizon_probabilities: Optional[Dict[int, float]] = None) -> Dict[int, Dict[str, Any]]:
     """Compute outcomes at each horizon from ADJUSTED price series.
 
     Args:
@@ -259,6 +279,18 @@ def evaluate_outcomes(price_at_call_date: str, action: str, prices, benchmark,
                           call and horizon is handled consistently — corporate
                           actions never manufacture a spurious return).
       edge_score:         probability-like field; enables Brier where present.
+                          Used as the single blended P(direction correct) at
+                          every horizon when horizon_probabilities is absent.
+      horizon_probabilities: optional {horizon_days: p_up} from
+                          intelligence/prediction_engine.py's genuinely
+                          per-horizon forecast. When a horizon has an entry
+                          here, it's used INSTEAD of the single blended
+                          edge_score for that horizon's Brier score - a
+                          real per-horizon probability rather than one
+                          number reused five times. Absent entirely, or
+                          missing for a specific horizon: falls back to the
+                          edge_score blend, byte-identical to before this
+                          param existed.
 
     Missing market days: the call date is snapped to the nearest available
     trading day at/after it, and a horizon of N is N POSITIONS along the
@@ -281,7 +313,7 @@ def evaluate_outcomes(price_at_call_date: str, action: str, prices, benchmark,
     p_call = float(prices.iloc[pos])
     bullish = action.upper() in _BULLISH
     bearish = action.upper() in _BEARISH
-    p_dir = None if edge_score is None else 0.5 + 0.5 * float(edge_score)   # P(direction correct)
+    default_p_dir = None if edge_score is None else 0.5 + 0.5 * float(edge_score)   # P(direction correct)
 
     # Benchmark aligned to the same trading-day grid.
     bench = benchmark.dropna() if benchmark is not None else None
@@ -315,6 +347,8 @@ def evaluate_outcomes(price_at_call_date: str, action: str, prices, benchmark,
         else:
             direction_correct = None      # HOLD makes no directional claim
 
+        per_horizon_p = (horizon_probabilities or {}).get(h)
+        p_dir = per_horizon_p if per_horizon_p is not None else default_p_dir
         brier = None
         if p_dir is not None and direction_correct is not None:
             brier = (p_dir - direction_correct) ** 2
@@ -390,9 +424,16 @@ def refresh_outcomes(ticker: Optional[str] = None,
                         bench_cache[bmark] = benchmark_fetch_fn(bmark)
                     except Exception:
                         bench_cache[bmark] = None
+                horizon_probs = None
+                raw_hp = s.get("horizon_probabilities_json")
+                if raw_hp:
+                    try:
+                        horizon_probs = {int(k): v for k, v in json.loads(raw_hp).items()}
+                    except Exception:
+                        horizon_probs = None
                 outs = evaluate_outcomes(
                     s["created_at"][:10], s["action"], prices, bench_cache[bmark],
-                    edge_score=s.get("edge_score"))
+                    edge_score=s.get("edge_score"), horizon_probabilities=horizon_probs)
                 n_snap += 1
                 for h, o in outs.items():
                     _upsert_outcome(conn, s["snapshot_id"], h, o)
@@ -424,6 +465,21 @@ def _bucket_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "avg_excess_return_pct": round(sum(excess) / len(excess), 2) if excess else None,
         "brier": round(sum(briers) / len(briers), 4) if briers else None,
     }
+
+
+def _pearson(xs: List[float], ys: List[float]) -> Optional[float]:
+    """Hand-rolled Pearson correlation - stdlib+numpy only (numpy is already
+    a hard dependency; no scipy needed for one coefficient). None (not 0.0 or
+    a fabricated number) when there's too little data or no variance to
+    correlate meaningfully."""
+    n = len(xs)
+    if n < 3:
+        return None
+    import numpy as np
+    xs_arr, ys_arr = np.array(xs, dtype=float), np.array(ys, dtype=float)
+    if xs_arr.std() == 0 or ys_arr.std() == 0:
+        return None
+    return round(float(np.corrcoef(xs_arr, ys_arr)[0, 1]), 3)
 
 
 def calibration_report(horizon: int = 20, source: str = "all") -> Dict[str, Any]:
@@ -471,6 +527,27 @@ def calibration_report(horizon: int = 20, source: str = "all") -> Dict[str, Any]
                 leaning.append(r)
         pillar_attr[pillar] = _bucket_stats(leaning)
 
+    # Pillar correlation: a genuine Pearson correlation between each pillar's
+    # frozen score and the realized raw return - distinct from pillar_attribution
+    # above (a coarse >=60 threshold bucket). "Which signals actually add
+    # predictive value" (the item this feeds) needs the continuous relationship,
+    # not just a bucketed win rate.
+    pillar_correlation: Dict[str, Any] = {}
+    for pillar in ("technical", "algo", "risk", "fundamentals", "research", "social"):
+        xs: List[float] = []
+        ys: List[float] = []
+        for r in rows:
+            try:
+                pj = json.loads(r["pillars_json"] or "{}")
+            except Exception:
+                pj = {}
+            score = pj.get(pillar)
+            ret = r["raw_return_pct"]
+            if score is not None and ret is not None:
+                xs.append(float(score))
+                ys.append(float(ret))
+        pillar_correlation[pillar] = {"n": len(xs), "correlation_with_return": _pearson(xs, ys)}
+
     # Confidence reliability / calibration error: per statistical-edge bucket,
     # compare the predicted probability (0.5 + 0.5*edge_score) with the realized
     # win rate. ECE = sample-weighted mean gap. This is the honest answer to
@@ -503,8 +580,17 @@ def calibration_report(horizon: int = 20, source: str = "all") -> Dict[str, Any]
         "by_regime": by_regime,
         "by_sector": by_sector,
         "pillar_attribution": pillar_attr,
+        "pillar_correlation": pillar_correlation,
         "confidence_reliability": reliability,
     }
+
+
+def calibration_report_all_horizons(source: str = "all") -> Dict[int, Dict[str, Any]]:
+    """calibration_report() at every tracked horizon in one call - feeds a
+    "prediction accuracy by horizon" view without the caller needing to
+    import/know HORIZONS itself. Trivial loop; each horizon's report is
+    computed exactly as calibration_report() already computes it standalone."""
+    return {h: calibration_report(horizon=h, source=source) for h in HORIZONS}
 
 
 def summary(source: str = "all") -> Dict[str, Any]:
