@@ -92,6 +92,50 @@ def _pillar_block(label: str, pillar: dict | None) -> str:
     )
 
 
+def _intelligence_block(intelligence_context: dict | None) -> str:
+    """Format market-regime + named-contradiction context (the intelligence/
+    package) for the prediction prompt, or "" if none was supplied.
+
+    Same grounding-not-instruction philosophy as _pillar_block(): the agent
+    isn't told what to conclude, just given the deterministic regime read and
+    the contradictions the system already detected, so its narrative can
+    explain WHY signals disagree instead of silently ignoring or re-deriving
+    them. This is the one place intelligence context reaches an LLM - the
+    existing single prediction-agent call, not a new one.
+    """
+    if not intelligence_context:
+        return ""
+    parts = ["\n\nDETERMINISTIC MARKET CONTEXT (this app's own quant engine, not a guess):"]
+
+    regime = intelligence_context.get("regime")
+    if regime and regime.get("risk_stance"):
+        parts.append(
+            f"- Market regime: {regime.get('trend', 'unknown')} trend, "
+            f"{regime.get('volatility_regime', 'unknown')} volatility, stance {regime['risk_stance']}."
+        )
+
+    contradictions = intelligence_context.get("contradictions") or []
+    if contradictions:
+        parts.append("- Named signal contradictions detected (explain these, don't hide them):")
+        for c in contradictions:
+            parts.append(f"  * {c.get('name')}: {c.get('description')}")
+
+    analog = intelligence_context.get("analog")
+    if analog and analog.get("status") == "ok":
+        outcome_63 = (analog.get("outcome_by_horizon") or {}).get(63)
+        if outcome_63 and outcome_63.get("n"):
+            parts.append(
+                f"- Historical analogs: {outcome_63['n']} similar past setups on this ticker, "
+                f"{outcome_63['pct_positive']:.0%} positive at ~3 months, avg return "
+                f"{outcome_63['avg_return_pct']:+.1f}% (context, not a guarantee)."
+            )
+
+    if len(parts) == 1:
+        return ""  # nothing meaningful was actually supplied
+    parts.append("Your analysis should explain and be consistent with this context, not silently contradict it.")
+    return "\n".join(parts)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 1. Fundamentals Agent
 # ══════════════════════════════════════════════════════════════════════════
@@ -375,6 +419,7 @@ def _build_prediction_prompt(
     signal_summary: dict,
     social_analysis: str = "",
     algo_analysis: str = "",
+    intelligence_context: dict | None = None,
 ) -> tuple[str, str]:
     system = """You are the head of investment strategy at a hedge fund.
 Synthesize fundamentals, technicals, social sentiment, and quant signals
@@ -400,7 +445,7 @@ TECHNICAL SIGNAL SCORE: {signal_summary.get('score', 'N/A')}/100 ({signal_summar
 Output ONLY valid JSON matching this schema exactly:
 {json.dumps(PREDICTION_SCHEMA, indent=2)}
 
-Replace all placeholder strings with actual values. Use real numbers not strings for upside_pct, downside_pct, and scores."""
+Replace all placeholder strings with actual values. Use real numbers not strings for upside_pct, downside_pct, and scores.{_intelligence_block(intelligence_context)}"""
 
     return system, user
 
@@ -417,11 +462,13 @@ def run_prediction_agent(
     algo_analysis: str = "",
     self_critique: bool = False,
     verbose: bool = False,
+    intelligence_context: dict | None = None,
 ) -> dict:
     system, user = _build_prediction_prompt(
         ticker, company_name, current_price,
         fundamentals_analysis, technical_analysis,
         signal_summary, social_analysis, algo_analysis,
+        intelligence_context,
     )
 
     raw = ""
