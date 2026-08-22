@@ -215,7 +215,7 @@ guessed), `test_broker_no_trading.py` (the guard-rail above).
 
 **Known bug:** `start.sh` checks for `ANTHROPIC_API_KEY` and refuses to start without it, even though the actual app reads `DEEPSEEK_API_KEY` — this looks like a leftover from before DeepSeek support was wired in. The correct way to start the server today is `python3 web/app.py` directly (which does the correct `.env`-based DeepSeek key loading), not `./start.sh`.
 
-**Other stray file noticed, not yet cleaned up:** `.sk-64ae6a766df1449aa362cec152b38b07` in the project root appears to be debris from a broken command at some point (contains the literal text `echo DEEPSEEK_API_KEY=`, not a real API key file) — worth deleting, but left alone since its origin wasn't investigated and it's unrelated to the current work.
+**Stray debris file (deleted):** a file literally named `.sk-64ae6a766df1449aa362cec152b38b07` (embedded newlines, ending in the literal text `echo DEEPSEEK_API_KEY=`) sat tracked in the project root — its filename exposed the DeepSeek key. Removed. That same key value also lived inside a committed `.env` file in old history, before commit `31e7a0e` stopped tracking `.env` going forward — rotating the key on platform.deepseek.com and a full history scrub (`git filter-repo` + force-push to both remotes, to remove it from old commits too) are the still-open follow-ups, deliberately not done as a side effect of unrelated work.
 
 ---
 

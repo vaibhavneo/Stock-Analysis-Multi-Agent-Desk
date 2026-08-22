@@ -200,7 +200,7 @@ After auditing the full system, **zero critical gaps block v1.0 real use**. The 
 | Item | Effort | Why |
 |---|---|---|
 | Fix `start.sh` (checks wrong env var) | 5 min | Convenience; `python3 web/app.py` works fine |
-| Delete `.sk-64ae6a766df1449aa362cec152b38b07` debris file | 1 min | Cleanup |
+| ~~Delete `.sk-64ae6a766df1449aa362cec152b38b07` debris file~~ | done | Its filename exposed the DeepSeek key |
 | Add `python3 -m stock_agent` entry point | 15 min | Standard Python package convention |
 
 These are the only items classified as **required for v1.0 release** beyond the existing code.
@@ -337,7 +337,7 @@ These are the only items classified as **required for v1.0 release** beyond the 
 ### Pre-release (do once, before declaring v1.0)
 
 - [ ] Fix `start.sh` to check `DEEPSEEK_API_KEY` instead of `ANTHROPIC_API_KEY`
-- [ ] Delete `.sk-64ae6a766df1449aa362cec152b38b07` debris file
+- [x] Delete `.sk-64ae6a766df1449aa362cec152b38b07` debris file
 - [ ] Run all 16 test suites → ALL PASS
 - [ ] Start server → no startup errors
 - [ ] Run one full analysis (AAPL) → SSE completes, all dashboard sections render
