@@ -303,6 +303,41 @@ def analyze_stock(
             indicators, signal_summary, algo_signals, fundamentals, pit=pit_fund,
             reddit=reddit_data, stocktwits=stocktwits_data,
             llm_prose=prediction, run_id="pipeline")
+
+        # Attach per-horizon probabilities BEFORE logging: the prediction
+        # ledger's freeze_prediction() reads rec["horizon_probabilities"] and
+        # persists it, which is what lets evaluate_outcomes() later score a
+        # real per-horizon Brier instead of reusing one blended edge_score at
+        # all five horizons. Without this the forecast engine's per-horizon
+        # numbers would never be measured against reality - the journal would
+        # keep grading a prediction the engine no longer makes.
+        #
+        # Uses the recommendation's OWN pillars (strict/EDGAR-sourced), not
+        # the looser prompt-grounding snapshot, so what gets journaled matches
+        # what the engine actually acted on.
+        try:
+            from data.prediction_ledger import HORIZONS as _LEDGER_HORIZONS
+            from intelligence.prediction_engine import forecast_horizons
+            # Forecast at the LEDGER's horizons, not the engine's own defaults.
+            # The two tuples deliberately differ - the engine uses momentum-
+            # style periods (5/21/63/126/252), the ledger uses its established
+            # (1/5/20/60/126/252), which this session did not renumber because
+            # that would orphan every existing outcome row. Forecasting at the
+            # engine's periods would silently store probabilities at horizons
+            # 21 and 63 that the ledger never evaluates - journaled numbers
+            # that could never be scored.
+            _fc = forecast_horizons(
+                ticker, current_price, recommendation.get("pillars", {}), algo_signals,
+                regime=(intelligence_context or {}).get("regime"),
+                atr_14=(recommendation.get("levels") or {}).get("atr_14"),
+                horizons=tuple(_LEDGER_HORIZONS),
+            )
+            _probs = {h["horizon_days"]: h["p_up"] for h in (_fc.get("horizons") or {}).values()}
+            if _probs:
+                recommendation["horizon_probabilities"] = _probs
+        except Exception:
+            pass
+
         recommendation["recommendation_id"] = log_composite_recommendation(recommendation)
     except Exception as _e:
         # The composite failing must not sink the 7-agent analysis; fall back

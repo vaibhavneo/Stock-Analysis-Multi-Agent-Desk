@@ -77,7 +77,8 @@ class _MockSet:
 
     def __enter__(self):
         mocks = [p.start() for p in self._patchers]
-        self.plan_sections, self.run_selected = mocks[0], mocks[1]
+        (self.plan_sections, self.run_selected, self.build_full_recommendation,
+         self.build_backtest_all, self.gather_cheap_enrichments) = mocks
         return self
 
     def __exit__(self, *exc):
@@ -116,6 +117,59 @@ def test_plan_sections_called_with_the_request_body_fields():
           str(m.plan_sections.call_args))
 
 
+def test_narrow_preset_skips_backtest_all_and_calibration_by_horizon():
+    """The valuation preset ([historical_context] only, no evidence/analog)
+    must stay cheap: no backtest_all race, no calibration_by_horizon query.
+    This is the fix for the ~80s narrow-preset latency found by browser-
+    testing the real UI - regression-guarded here so it can't silently
+    regress back."""
+    with _MockSet(sections_result=["historical_context"]) as m:
+        resp = _client().post("/api/intelligence", json={"ticker": "test", "sections": "valuation"})
+        called_backtest_all = m.build_backtest_all.called
+        called_enrichments = m.gather_cheap_enrichments.called
+    body = resp.get_json()
+    check("200 OK on the narrow preset", resp.status_code == 200, str(body))
+    check("_build_backtest_all is NOT called for a narrow (non-deep) preset - the ~80s fix",
+          not called_backtest_all)
+    check("_gather_cheap_enrichments is NOT called for a narrow (non-deep) preset",
+          not called_enrichments)
+    check("calibration_by_horizon is absent from the response for a narrow preset",
+          "calibration_by_horizon" not in body, str(body.get("calibration_by_horizon")))
+
+
+def test_deep_preset_includes_calibration_by_horizon():
+    """The full preset (includes both evidence and analog) is the one place
+    item 11's forecast-vs-track-record pairing is worth the extra query -
+    confirmed reaching the response body with the real ledger function's
+    shape (n / win_rate / avg_return_pct / brier per horizon)."""
+    fake_by_horizon = {
+        5: {"overall": {"n": 40, "win_rate": 0.55, "avg_raw_return_pct": 1.1, "brier": 0.24}},
+        20: {"overall": {"n": 38, "win_rate": 0.61, "avg_raw_return_pct": 2.3, "brier": 0.21}},
+    }
+    deep_sections = ["regime", "historical_context", "analog", "forecast", "risk", "evidence"]
+    with _MockSet(sections_result=deep_sections) as m, \
+         patch("data.prediction_ledger.calibration_report_all_horizons", return_value=fake_by_horizon) as mock_cal:
+        resp = _client().post("/api/intelligence", json={"ticker": "test", "sections": "full"})
+    body = resp.get_json()
+    check("200 OK on the full/deep preset", resp.status_code == 200, str(body))
+    check("calibration_report_all_horizons was actually called for the deep preset", mock_cal.called)
+    cbh = body.get("calibration_by_horizon")
+    check("calibration_by_horizon is present in the response", cbh is not None, str(body.keys()))
+    if cbh:
+        check("horizon 5's win_rate carries through correctly", cbh.get("5", {}).get("win_rate") == 0.55, str(cbh))
+        check("horizon 20's n carries through correctly", cbh.get("20", {}).get("n") == 38, str(cbh))
+
+
+def test_calibration_by_horizon_failure_degrades_to_none_not_500():
+    deep_sections = ["regime", "historical_context", "analog", "forecast", "risk", "evidence"]
+    with _MockSet(sections_result=deep_sections) as m, \
+         patch("data.prediction_ledger.calibration_report_all_horizons", side_effect=RuntimeError("db locked")):
+        resp = _client().post("/api/intelligence", json={"ticker": "test", "sections": "full"})
+    check("a calibration_by_horizon failure still returns 200, not a 500", resp.status_code == 200)
+    check("calibration_by_horizon is explicitly None (not silently dropped, not a crash)",
+          resp.get_json().get("calibration_by_horizon") is None)
+
+
 def test_avg_cost_sets_owns_position_and_reaches_run_selected():
     with _MockSet() as m:
         resp = _client().post("/api/intelligence", json={"ticker": "test", "avg_cost": 120.0, "shares": 10})
@@ -150,6 +204,9 @@ if __name__ == "__main__":
     test_missing_ticker_returns_400()
     test_basic_request_returns_a_decision_report_with_intelligence_sections()
     test_plan_sections_called_with_the_request_body_fields()
+    test_narrow_preset_skips_backtest_all_and_calibration_by_horizon()
+    test_deep_preset_includes_calibration_by_horizon()
+    test_calibration_by_horizon_failure_degrades_to_none_not_500()
     test_avg_cost_sets_owns_position_and_reaches_run_selected()
     test_no_avg_cost_means_owns_position_false()
     test_exception_returns_500_not_a_crash()

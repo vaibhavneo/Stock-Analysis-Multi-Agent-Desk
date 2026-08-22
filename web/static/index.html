@@ -3157,6 +3157,23 @@ function renderIntelligenceCard(d) {
     </div>`;
   }).join('') : '<div style="font-size:12px;color:var(--muted)">Not computed in this mode.</div>';
 
+  // Track record by horizon - shown directly under the forecast so a
+  // prediction is never displayed without the engine's own accuracy at that
+  // same horizon sitting next to it.
+  const cbh = d.calibration_by_horizon;
+  const trackRecord = cbh ? Object.entries(cbh)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([days, r]) => {
+      if (!r.n) return `<div style="font-size:10px;color:var(--muted);padding:1px 0">${days}d: no matured predictions yet</div>`;
+      const wr = r.win_rate;
+      const wrCol = wr == null ? 'var(--muted)' : wr >= 0.55 ? 'var(--green)' : wr >= 0.45 ? 'var(--yellow)' : 'var(--red)';
+      return `<div style="font-size:10px;padding:1px 0">
+        <span style="color:var(--muted)">${days}d:</span>
+        <span style="color:${wrCol};font-weight:700">${wr != null ? (wr*100).toFixed(0)+'% win' : '—'}</span>
+        <span style="color:var(--muted)"> · n=${r.n} · avg ${pctSigned(r.avg_return_pct)}</span>
+      </div>`;
+    }).join('') : '';
+
   // Bull/base/bear (existing scenario prose, reused)
   const sc = d.scenarios || {};
 
@@ -3214,6 +3231,10 @@ function renderIntelligenceCard(d) {
         ${regimeBlock}
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Prediction by Horizon</div>
         ${horizonRows}
+        ${trackRecord ? `<div style="margin-top:6px;padding-top:5px;border-top:1px dashed var(--border)">
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">
+            Track record at these horizons</div>
+          ${trackRecord}</div>` : ''}
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Bull / Base / Bear</div>
         <div style="font-size:11px;line-height:1.6">
           <span style="color:var(--green)">Bull:</span> ${sc.bull_case||'—'}<br>

@@ -413,13 +413,23 @@ def predictions_refresh():
 def calibration():
     """Win rate, calibration error, agent (pillar) attribution, and confidence
     reliability over matured outcomes at a horizon (default 20 trading days).
-    `source` = all | live | replay (historical) for the historical-vs-live view."""
+    `source` = all | live | replay (historical) for the historical-vs-live view.
+    `all_horizons=1` additionally returns the same report at EVERY tracked
+    horizon under `by_horizon` - "performance by horizon", which needs the
+    horizons side by side to be readable at all. Opt-in rather than always-on
+    because it is N times the query work of the single-horizon default."""
     try:
         from data import prediction_ledger as pl
         horizon = int(request.args.get("horizon", 20))
         source = request.args.get("source", "all")
         rep = pl.calibration_report(horizon=horizon, source=source)
         rep["summary"] = pl.summary(source=source)
+        if request.args.get("all_horizons") in ("1", "true", "yes"):
+            rep["by_horizon"] = {
+                str(h): {"overall": r.get("overall"),
+                         "calibration_error_ece": r.get("calibration_error_ece")}
+                for h, r in pl.calibration_report_all_horizons(source=source).items()
+            }
         return jsonify(rep)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -855,6 +865,26 @@ def intelligence_endpoint():
             evidence=intel.get("evidence"),
         )
         report["sections_computed"] = sections
+
+        # Item 11 reaching the user: pair "here is my forecast at each
+        # horizon" with "here is how accurate this engine has actually BEEN
+        # at each horizon." A forecast shown without its own track record is
+        # the exact false confidence this upgrade is meant to remove. Local
+        # SQLite only (no network), but still gated to the deep preset so a
+        # narrow request stays narrow.
+        if deep:
+            try:
+                from data import prediction_ledger as _pl
+                report["calibration_by_horizon"] = {
+                    str(h): {"n": (r.get("overall") or {}).get("n"),
+                             "win_rate": (r.get("overall") or {}).get("win_rate"),
+                             "avg_return_pct": (r.get("overall") or {}).get("avg_raw_return_pct"),
+                             "brier": (r.get("overall") or {}).get("brier")}
+                    for h, r in _pl.calibration_report_all_horizons().items()
+                }
+            except Exception:
+                report["calibration_by_horizon"] = None
+
         return jsonify(report)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
