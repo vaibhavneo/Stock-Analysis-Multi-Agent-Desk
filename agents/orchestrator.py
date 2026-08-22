@@ -233,11 +233,43 @@ def analyze_stock(
     social_analysis       = analysis["social_analysis"]
     algo_analysis         = analysis["algo_analysis"]
 
+    # ── Intelligence context for the prediction prompt ────────────────────
+    # Market regime + any NAMED contradictions between the pillars, so the
+    # prediction agent can explain WHY signals disagree instead of silently
+    # averaging past them. This adds NO new LLM call - it enriches the single
+    # prediction call that already happens below - and no new price fetch for
+    # this ticker; the only extra network work is SPY/VIX, which
+    # financial_data caches (6h TTL) and which is shared across every ticker
+    # analyzed in a session.
+    #
+    # Wrapped whole: this is narrative enrichment, so any failure here must
+    # degrade to the exact pre-existing prompt rather than cost the user
+    # their analysis. Also leaves analyze_stock()'s return dict untouched -
+    # the regime is an INPUT to the prose here, not a new output key.
+    intelligence_context = None
+    try:
+        from intelligence.evidence_synthesis import detect_contradictions
+        from intelligence.regime import compute_market_regime
+
+        _regime = compute_market_regime()
+        _contradictions = detect_contradictions(pillars, regime=_regime)
+        if (_regime and _regime.get("risk_stance")) or _contradictions:
+            intelligence_context = {"regime": _regime, "contradictions": _contradictions}
+            if _contradictions:
+                progress("intelligence",
+                         f"Market regime: {_regime.get('risk_stance')} · "
+                         f"{len(_contradictions)} signal contradiction(s) detected")
+            else:
+                progress("intelligence", f"Market regime: {_regime.get('risk_stance')}")
+    except Exception:
+        intelligence_context = None
+
     progress("prediction", "Prediction agent: generating final verdict...")
     prediction = run_prediction_agent(
         client, ticker, company_name, current_price,
         fundamentals_analysis, technical_analysis,
         signal_summary, social_analysis, algo_analysis,
+        intelligence_context=intelligence_context,
     )
 
     progress("grounding", "Grounding prediction with backtested strategies...")
