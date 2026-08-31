@@ -2,9 +2,15 @@
 # Daily heartbeat wrapper for cron.
 #
 # WHY A WRAPPER, NOT A RAW CRON LINE
-#   cron runs with a minimal environment and an unpredictable working
+#   launchd runs with a minimal environment and an unpredictable working
 #   directory. This pins both, so the job behaves the same as an interactive
-#   run instead of failing in ways only cron can produce.
+#   run instead of failing in ways only a scheduled context can produce.
+#
+# LOCATION MATTERS. This repo must NOT live under ~/Desktop, ~/Documents or
+#   ~/Downloads: macOS TCC denies scheduled processes access to those, and the
+#   failure is silent-ish (exit 126, "Operation not permitted"). Verified by
+#   experiment - an identical LaunchAgent ran fine from outside those folders
+#   and failed inside them.
 #
 # TIMING — once per trading day, AFTER the close, never intraday.
 #   An intraday run would freeze a prediction against a price that is still
@@ -23,7 +29,14 @@
 
 set -uo pipefail
 
-REPO="/Users/vaibhavgupta/Desktop/Project Agentic AI/stock_agent"
+# Self-locating: derive the repo from this script's own path rather than
+# hardcoding it. The previous hardcoded ~/Desktop path broke when the repo had
+# to be moved out of Desktop (macOS TCC denies scheduled jobs access to
+# Desktop/Documents/Downloads), and a hardcoded path would break again on the
+# next move. Resolves symlinks so `launchctl` invoking a linked copy still works.
+SCRIPT="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT" ]; do SCRIPT="$(readlink "$SCRIPT")"; done
+REPO="$(cd "$(dirname "$SCRIPT")" && pwd -P)"
 PY="/usr/bin/python3"
 LOG_DIR="$REPO/logs"
 LOG="$LOG_DIR/heartbeat-$(date +%Y-%m-%d).log"
