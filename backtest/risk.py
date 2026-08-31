@@ -126,8 +126,15 @@ def correlation_aware_position_size(
     cluster of near-identical strategies ends up sized close to a single
     position rather than the sum.
 
-    proposed_positions:     {strategy_name: kelly_sized_fraction}
-    strategy_return_series: {strategy_name: pd.Series of that strategy's returns}
+    The math is name-agnostic: it de-duplicates any set of return streams that
+    move together. Strategies-on-one-ticker was the original use; the portfolio
+    layer (agents/portfolio_brief.py) feeds it {ticker: 1.0} against per-ticker
+    price returns to recover a pure haircut factor per HOLDING, which is the
+    same "five names that are really one bet" problem one level up. Keep it
+    generic — do not narrow it back to strategies.
+
+    proposed_positions:     {name: sized_fraction}   (name = strategy OR ticker)
+    strategy_return_series: {name: pd.Series of that name's returns}
     """
     names = list(proposed_positions.keys())
     if len(names) <= 1:

@@ -216,6 +216,110 @@ def test_add_fires_when_underweight_and_proven():
     check("add zone supplied", h["levels"]["add_zone"] is not None)
 
 
+# ── Cross-position correlation haircut ─────────────────────────────────────
+
+def _returns(seed, n=120, shared=None, rho=1.0):
+    """Synthetic daily return series. `shared` + independent noise lets a test
+    dial the correlation between two names precisely."""
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2024-01-01", periods=n, freq="D")
+    noise = rng.normal(0, 0.01, n)
+    if shared is None:
+        return pd.Series(noise, index=idx)
+    return pd.Series(rho * shared.to_numpy() + (1 - rho) * noise, index=idx)
+
+
+def _add_setup():
+    """Two underweight, proven-edge names — both would ADD on their own."""
+    a = _rec("AAA", action="BUY", composite=78, stat_level="HIGH",
+             alloc_level="HIGH", gated=False, size_pct=10.0, current_price=100.0)
+    b = _rec("BBB", action="BUY", composite=78, stat_level="HIGH",
+             alloc_level="HIGH", gated=False, size_pct=10.0, current_price=100.0)
+    filler = _rec("CASH", action="HOLD", composite=50, stat_level="LOW",
+                  alloc_level="NONE", gated=True, current_price=100.0)
+    return [_holding("AAA", 5, 90.0, a), _holding("BBB", 5, 90.0, b),
+            _holding("CASH", 90, 90.0, filler)]
+
+
+def test_correlation_absent_reproduces_previous_behaviour():
+    """No returns supplied -> byte-identical to the pre-correlation output."""
+    before = build_portfolio_brief(_add_setup(), max_weight_pct=25.0)
+    after = build_portfolio_brief(_add_setup(), max_weight_pct=25.0, returns=None)
+    check("omitting returns changes nothing",
+          [h["target_weight_pct"] for h in before["holdings"]]
+          == [h["target_weight_pct"] for h in after["holdings"]])
+    check("correlation field present but null when unjudged",
+          all(h.get("correlation") is None for h in after["holdings"]))
+    check("no correlation risks reported", after["portfolio"]["correlation_risks"] == [])
+
+
+def test_highly_correlated_holdings_get_add_headroom_cut():
+    """Two names that move together are one bet - their add headroom shrinks."""
+    base = _returns(1)
+    rets = {"AAA": base, "BBB": _returns(2, shared=base, rho=0.98),
+            "CASH": _returns(3)}
+    uncorr = build_portfolio_brief(_add_setup(), max_weight_pct=25.0)
+    corr = build_portfolio_brief(_add_setup(), max_weight_pct=25.0, returns=rets)
+    a_un, a_corr = _find(uncorr, "AAA"), _find(corr, "AAA")
+    check("correlated target weight is lower than standalone",
+          a_corr["target_weight_pct"] < a_un["target_weight_pct"])
+    check("haircut recorded on the holding", (a_corr.get("correlation") or {}).get("haircut") is not None)
+    check("pre-correlation target preserved for audit",
+          (a_corr.get("correlation") or {}).get("pre_correlation_target_pct")
+          == a_un["target_weight_pct"])
+    check("portfolio surfaces the correlation risk",
+          any(r["ticker"] == "AAA" for r in corr["portfolio"]["correlation_risks"]))
+    check("correlated weight reported", corr["portfolio"]["correlated_weight_pct"] > 0)
+
+
+def test_uncorrelated_holdings_keep_full_size():
+    """Independent names must NOT be penalised - the haircut is not a blanket tax."""
+    rets = {"AAA": _returns(11), "BBB": _returns(22), "CASH": _returns(33)}
+    plain = build_portfolio_brief(_add_setup(), max_weight_pct=25.0)
+    out = build_portfolio_brief(_add_setup(), max_weight_pct=25.0, returns=rets)
+    check("uncorrelated target unchanged",
+          _find(out, "AAA")["target_weight_pct"] == _find(plain, "AAA")["target_weight_pct"])
+    check("no correlation note for independent names",
+          _find(out, "AAA").get("correlation") is None)
+
+
+def test_correlation_never_forces_a_sell():
+    """The haircut may shrink ADD headroom but must never push target below what
+    is already held - that would manufacture a TRIM/EXIT from an unbacktested
+    correlation estimate."""
+    base = _returns(4)
+    rets = {"AAA": base, "BBB": _returns(5, shared=base, rho=0.99), "CASH": _returns(6)}
+    out = build_portfolio_brief(_add_setup(), max_weight_pct=25.0, returns=rets)
+    for t in ("AAA", "BBB"):
+        h = _find(out, t)
+        check(f"{t} target not pushed below current weight",
+              h["target_weight_pct"] >= h["current_weight_pct"])
+        check(f"{t} not turned into a sell by correlation",
+              h["position_action"] not in ("TRIM", "EXIT"))
+
+
+def test_too_little_history_means_no_haircut():
+    """Under MIN_CORR_OBS overlapping bars, correlation is noise - report nothing
+    rather than acting on an estimate that isn't there."""
+    base = _returns(7, n=12)
+    rets = {"AAA": base, "BBB": _returns(8, n=12, shared=base, rho=0.99),
+            "CASH": _returns(9, n=12)}
+    plain = build_portfolio_brief(_add_setup(), max_weight_pct=25.0)
+    out = build_portfolio_brief(_add_setup(), max_weight_pct=25.0, returns=rets)
+    check("short history leaves sizing untouched",
+          _find(out, "AAA")["target_weight_pct"] == _find(plain, "AAA")["target_weight_pct"])
+
+
+def test_malformed_returns_degrade_silently():
+    """A broken returns payload must never cost the user their brief."""
+    out = build_portfolio_brief(_add_setup(), max_weight_pct=25.0,
+                                returns={"AAA": "not a series", "BBB": None})
+    check("brief still produced", len(out["holdings"]) == 3)
+    check("no correlation risks claimed", out["portfolio"]["correlation_risks"] == [])
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

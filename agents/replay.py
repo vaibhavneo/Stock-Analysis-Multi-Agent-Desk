@@ -149,6 +149,53 @@ def _default_pit_fn(ticker: str, as_of: str) -> Dict[str, Any]:
     return analyze_fundamentals_pit(ticker, as_of=as_of, run_id=f"replay:{as_of}")
 
 
+def _pit_horizon_probabilities(ticker: str, rec: Dict[str, Any],
+                               algo_signals: Dict[str, Any], df) -> Optional[Dict[int, float]]:
+    """Per-horizon p_up for a REPLAYED prediction, computed point-in-time.
+
+    Without this a replayed snapshot freezes an action but no probability, and
+    the calibration layer has nothing to learn from — which is exactly why a
+    ledger full of matured replay outcomes was still unusable for calibration.
+
+    Two inputs are deliberately withheld, and both would be lookahead:
+
+      regime      compute_market_regime() reads TODAY's SPY/VIX, not the market
+                  as it stood at as_of. Passing it would let a 2024 replay see
+                  2026 conditions. There is no PIT regime source yet, so the
+                  forecast is made without one and flags itself accordingly.
+
+      calibrators A calibration map is fitted on outcomes that, relative to
+                  as_of, live in the future. Feeding it back into a replayed
+                  forecast would both leak and be circular — the engine would
+                  be graded on a probability it could only state with hindsight.
+
+    Everything else (pillars, algo signals, ATR, price) already comes from
+    pit_inputs(), so it carries the same as_of guarantee the recommendation does.
+
+    Returns None on any failure: a replay that freezes an action without a
+    probability is degraded but still honest, which is better than aborting the
+    row or storing a guess.
+    """
+    try:
+        from data.prediction_ledger import HORIZONS
+        from intelligence.prediction_engine import forecast_horizons
+
+        fc = forecast_horizons(
+            ticker,
+            float(df.iloc[-1]),
+            rec.get("pillars", {}),
+            algo_signals,
+            regime=None,             # see docstring - would be lookahead
+            atr_14=(rec.get("levels") or {}).get("atr_14"),
+            horizons=tuple(HORIZONS),
+            calibrators=None,        # see docstring - would leak and be circular
+        )
+        probs = {h["horizon_days"]: h["p_up"] for h in (fc.get("horizons") or {}).values()}
+        return probs or None
+    except Exception:
+        return None
+
+
 def replay_one(ticker: str, as_of: str, full_prices, run_id: str,
                benchmark: str = "SPY",
                pit_fn: Optional[Callable[[str, str], Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -182,6 +229,8 @@ def replay_one(ticker: str, as_of: str, full_prices, run_id: str,
         rec["replay_run_id"] = run_id
         rec["replay_meta"] = {"coverage": coverage, "missing": missing,
                               "exclusions": exclusions, "as_of": as_of}
+        rec["horizon_probabilities"] = _pit_horizon_probabilities(
+            ticker, rec, algo, df)
         sid = pl.freeze_prediction(rec)
         return {"status": "done", "snapshot_id": sid, "coverage": coverage,
                 "missing": missing, "exclusions": exclusions,

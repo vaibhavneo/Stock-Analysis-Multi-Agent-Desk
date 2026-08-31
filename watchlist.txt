@@ -1,0 +1,96 @@
+# Daily heartbeat universe — liquid US large-caps across sectors.
+# One symbol per line; blank lines and # comments ignored.
+#
+# Size guidance (MEASURED, 30 Aug 2026, not estimated):
+#   forecast cost is ~9.0s/ticker mean but heavily skewed
+#   (p50 3.4s, p90 19.8s, max 42.0s) — cold provider caches dominate the tail.
+#   75 tickers took 11.3 minutes end to end. 200 would take ~30 minutes.
+# Widen this list deliberately: breadth is the lever on independent samples at
+# short horizons, but ten mega-caps on one day are not ten independent draws.
+
+# mega-cap tech
+AAPL
+MSFT
+NVDA
+AMZN
+GOOGL
+META
+AVGO
+TSLA
+ORCL
+CRM
+AMD
+INTC
+QCOM
+TXN
+MU
+ADBE
+CSCO
+IBM
+NOW
+INTU
+
+# financials
+JPM
+BAC
+WFC
+GS
+MS
+C
+AXP
+BLK
+SCHW
+SPGI
+
+# health care
+JNJ
+UNH
+LLY
+PFE
+ABBV
+MRK
+TMO
+ABT
+DHR
+BMY
+
+# consumer
+WMT
+COST
+PG
+KO
+PEP
+MCD
+NKE
+HD
+LOW
+SBUX
+
+# industrial / energy / materials
+CAT
+DE
+BA
+GE
+HON
+UPS
+LMT
+RTX
+XOM
+CVX
+COP
+SLB
+LIN
+APD
+NEM
+
+# utilities / telecom / real estate
+NEE
+DUK
+SO
+T
+VZ
+CMCSA
+AMT
+PLD
+SPG
+O

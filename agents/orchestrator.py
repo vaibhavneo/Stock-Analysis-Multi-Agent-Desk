@@ -326,11 +326,22 @@ def analyze_stock(
             # engine's periods would silently store probabilities at horizons
             # 21 and 63 that the ledger never evaluates - journaled numbers
             # that could never be scored.
+            # Feedback edge: correct p_up using how earlier predictions at the
+            # same horizon actually resolved. Fitted from the ledger, gated on
+            # sample size AND on beating raw probabilities out-of-sample, so
+            # this is a no-op until there is real evidence it helps.
+            try:
+                from intelligence.calibration import load_calibrators
+                _cals = load_calibrators(_LEDGER_HORIZONS)
+            except Exception:
+                _cals = None
+
             _fc = forecast_horizons(
                 ticker, current_price, recommendation.get("pillars", {}), algo_signals,
                 regime=(intelligence_context or {}).get("regime"),
                 atr_14=(recommendation.get("levels") or {}).get("atr_14"),
                 horizons=tuple(_LEDGER_HORIZONS),
+                calibrators=_cals,
             )
             _probs = {h["horizon_days"]: h["p_up"] for h in (_fc.get("horizons") or {}).values()}
             if _probs:

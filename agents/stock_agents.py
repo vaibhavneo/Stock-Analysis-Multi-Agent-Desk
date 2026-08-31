@@ -617,3 +617,108 @@ def _self_critique(
     result = dict(draft)
     result["self_critique"] = "flagged_but_kept_original"
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 6. Decision Explainer — narrates a decision it cannot change
+# ══════════════════════════════════════════════════════════════════════════
+# Every agent above analyses a DOMAIN and feeds the machine. This one runs at
+# the other end: the deterministic layers have already produced a verdict, a
+# size, and a probability, and its only job is to say WHY, in plain language,
+# from the numbers it is handed.
+#
+# The separation is the point. Composite, action, size, levels and calibration
+# are computed and frozen before this call; the explainer receives them as
+# read-only facts. It cannot upgrade a HOLD to a BUY, resize a position, or
+# invent a target, because nothing downstream reads its output — the prose is
+# a leaf of the pipeline, not a node in it. That is what makes it safe to put
+# an LLM at the final step of a system whose whole design keeps LLMs away from
+# the numbers.
+#
+# COST: this is a 6th LLM call and is therefore OPT-IN, never part of
+# analyze_stock()'s default path. Callers ask for it explicitly.
+
+_EXPLAIN_SYS = """You are explaining a quantitative investment system's decision
+to the person who owns the money. The decision has ALREADY been made by
+deterministic formulas — you are not deciding anything, and nothing you write
+changes any number.
+
+Rules:
+- Explain WHY the machine reached this verdict, in plain language.
+- Every number you cite must come from the data given. Invent nothing.
+- If the pillars disagree, say so plainly and explain what the disagreement means.
+- If evidence is weak, thin, or flagged, say that too — do not talk it up.
+- Never recommend a different action, price, or size than the one given.
+- No hedging boilerplate, no disclaimers. Be concrete and readable."""
+
+
+def _build_explain_prompt(rec: dict, forecast: dict | None = None) -> tuple[str, str]:
+    pillars = rec.get("pillars") or {}
+    pillar_lines = "\n".join(
+        f"  - {name}: {p.get('score')}/100 (confidence {p.get('confidence')})"
+        for name, p in pillars.items()
+    ) or "  (no pillar scores available)"
+
+    lanes = rec.get("lanes") or {}
+    lane_note = ""
+    if lanes:
+        v = lanes.get("validated", {})
+        t = lanes.get("tracked_forward", {})
+        lane_note = (
+            f"\n\nEVIDENCE QUALITY (state this honestly):\n"
+            f"  Validated (backtested) pillars carry {v.get('core_weight')} of the core weight.\n"
+            f"  Tracked-forward pillars are capped at {t.get('max_modifier_pts')} points of tilt.\n"
+            f"  Caveat: {lanes.get('caveat')}")
+
+    horizon_note = ""
+    if forecast and forecast.get("horizons"):
+        rows = []
+        for label, h in forecast["horizons"].items():
+            cal = " (calibrated from past outcomes)" if h.get("calibrated") else ""
+            rows.append(f"  - {label}: p(up) = {h.get('p_up')}, {h.get('direction')}{cal}")
+        horizon_note = "\n\nFORECAST BY HORIZON:\n" + "\n".join(rows)
+
+    user = f"""Explain this decision for {rec.get('ticker')}.
+
+THE DECISION (already final — explain it, do not revise it):
+  Action:        {rec.get('action')}
+  Composite:     {rec.get('composite')}/100
+  Conviction:    {rec.get('conviction')}
+  Position size: {rec.get('position_size_pct')}% {"(GATED - edge not proven)" if rec.get('position_size_gated') else ""}
+  Risk veto:     {rec.get('risk_veto')}
+
+PILLAR SCORES (what drove the composite):
+{pillar_lines}
+
+PRICE LEVELS: {_fmt(rec.get('levels') or {})}
+
+CONFIDENCE DIMENSIONS: {_fmt(rec.get('confidence') or {})}
+
+HONESTY FLAGS: {_fmt(rec.get('honesty_flags') or {})}{lane_note}{horizon_note}
+
+Write 4 short sections:
+1. **The call** — what the system decided and the single biggest reason.
+2. **What drove it** — which pillars carried the decision, with their numbers.
+3. **What argues against it** — the strongest honest counter-case, including
+   any weak evidence, disagreement between pillars, or flagged data.
+4. **What would change it** — the concrete condition that would flip this call.
+
+250 words max. No disclaimers."""
+    return _EXPLAIN_SYS, user
+
+
+def run_decision_explainer(
+    client: OpenAI,
+    rec: dict,
+    forecast: dict | None = None,
+    verbose: bool = False,
+) -> str:
+    """Plain-language explanation of a decision the deterministic layer already
+    made. Read-only with respect to every number in `rec`.
+
+    Returns the "[Agent error: ...]" string on failure like the other agents —
+    an explanation is a convenience, and never worth failing a real analysis
+    that has already been computed.
+    """
+    system, user = _build_explain_prompt(rec, forecast)
+    return _call(client, system, user)

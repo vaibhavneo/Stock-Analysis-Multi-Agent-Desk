@@ -1010,7 +1010,23 @@ def portfolio_brief_endpoint():
                 "xsec_ranking": shared_xsec,   # same ranking; each holding finds its own row
             })
 
-        result = build_portfolio_brief(enriched, max_weight_pct=max_weight)
+        # Cross-position correlation inputs. Fetched HERE, not inside
+        # portfolio_brief: that module is a pure consumer that creates no
+        # providers. A failure (or a thin/short series) simply means no
+        # correlation adjustment - never a failed brief.
+        from tools.market_data import fetch_price_history
+
+        returns = {}
+        for h in enriched:
+            try:
+                _hist = fetch_price_history(h["ticker"], period="1y")
+                if _hist is not None and not _hist.empty:
+                    returns[h["ticker"]] = _hist["Close"].astype(float).pct_change().dropna()
+            except Exception:
+                continue
+
+        result = build_portfolio_brief(enriched, max_weight_pct=max_weight,
+                                       returns=returns or None)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

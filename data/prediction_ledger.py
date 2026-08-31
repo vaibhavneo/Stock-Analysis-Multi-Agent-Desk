@@ -118,7 +118,45 @@ CREATE TABLE IF NOT EXISTS prediction_outcomes (
     PRIMARY KEY (snapshot_id, horizon_days),
     FOREIGN KEY (snapshot_id) REFERENCES prediction_snapshots(snapshot_id)
 );
+
+-- QUARANTINE: snapshots that exist but must never count as production evidence
+-- (synthetic tickers from test runs, and anything else later found not to be a
+-- genuine market observation).
+--
+-- Why a separate table rather than a column or a DELETE: a frozen prediction is
+-- immutable by design, and that is the property which makes the track record
+-- evidence rather than a story. So the snapshot row is left byte-identical and
+-- the quarantine is an additive assertion ABOUT it. Nothing is rewritten, and
+-- the excluded rows remain fully auditable.
+CREATE TABLE IF NOT EXISTS snapshot_quarantine (
+    snapshot_id     TEXT PRIMARY KEY,
+    ticker          TEXT,
+    reason          TEXT NOT NULL,
+    quarantined_at  TEXT NOT NULL
+);
 """
+
+# Tickers that can only come from a test or a fixture, never from a market.
+# Matching is exact (case-insensitive) rather than prefix-based on purpose:
+# real symbols like "T" (AT&T) and "A" (Agilent) exist, so a loose rule would
+# quarantine genuine evidence. Anything ambiguous belongs on this list only
+# after checking it is not a live symbol.
+SYNTHETIC_TICKERS = frozenset({
+    "TEST", "EXPL", "FAKE", "DUMMY", "SAMPLE", "FOO", "BAR", "BAZ",
+    "AAA", "BBB", "CCC", "DDD", "XXX", "ZZZ",
+    "GOOD", "BAD", "ALSOGOOD", "WEAK", "GROW", "PROSE", "VETO", "SAME", "CASH",
+})
+
+
+def is_synthetic_ticker(ticker: Optional[str]) -> bool:
+    """True when a symbol could only have come from a test or fixture.
+
+    The production invariant this supports: calibration and evaluation may
+    consume ONLY genuine market snapshots.
+    """
+    if not ticker:
+        return True                     # unnamed is not a market observation
+    return str(ticker).strip().upper() in SYNTHETIC_TICKERS
 
 _BULLISH = {"BUY", "ACCUMULATE", "LONG"}
 _BEARISH = {"SELL", "REDUCE", "SHORT", "AVOID"}
@@ -142,13 +180,31 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+def _not_quarantined(alias: str = "s") -> str:
+    """SQL fragment excluding quarantined snapshots from production evidence.
+
+    THE production invariant lives here: calibration and evaluation consume
+    only genuine market snapshots. Every production read goes through
+    _source_where(), so enforcing it in one fragment means a future query
+    cannot forget it by accident.
+    """
+    return (f"AND {alias}.snapshot_id NOT IN "
+            f"(SELECT snapshot_id FROM snapshot_quarantine)")
+
+
 def _source_where(source: str, alias: str = "s") -> str:
-    """SQL fragment to filter live vs historical(replay) snapshots."""
+    """SQL fragment to filter live vs historical(replay) snapshots.
+
+    Always excludes quarantined snapshots, for every value of `source` —
+    including "all", which means "all GENUINE evidence", never "everything
+    that happens to be in the table".
+    """
+    base = _not_quarantined(alias)
     if source == "live":
-        return f"AND {alias}.replay_run_id IS NULL"
+        return f"AND {alias}.replay_run_id IS NULL {base}"
     if source in ("replay", "historical"):
-        return f"AND {alias}.replay_run_id IS NOT NULL"
-    return ""      # "all"
+        return f"AND {alias}.replay_run_id IS NOT NULL {base}"
+    return base    # "all" = all genuine
 
 
 # ── Freeze (immutable snapshot) ─────────────────────────────────────────────
@@ -221,11 +277,87 @@ def freeze_prediction(rec: Dict[str, Any]) -> Optional[str]:
                  json.dumps(frozen["horizon_probabilities"]) if frozen["horizon_probabilities"] else None,
                  json.dumps(frozen, default=str), content_hash))
             conn.commit()
-            return sid
+        finally:
+            conn.close()
+
+        # PREVENTION: a synthetic ticker is quarantined at the moment it is
+        # written, so test pollution can never reach production evidence even
+        # if a suite forgets to point at a throwaway database. Cleaning up
+        # after the fact (quarantine_synthetic) stays available for history,
+        # but this is what stops the problem recurring.
+        if is_synthetic_ticker(frozen["ticker"]):
+            quarantine_snapshot(sid, "synthetic_ticker", frozen["ticker"])
+        return sid
+    except Exception:
+        return None
+
+
+def quarantine_snapshot(snapshot_id: str, reason: str,
+                        ticker: Optional[str] = None) -> bool:
+    """Mark one snapshot as non-evidence. The snapshot row itself is untouched.
+
+    Idempotent: re-quarantining an already-quarantined id is a no-op, so this
+    is safe to call from freeze_prediction on every write.
+    """
+    try:
+        conn = _conn()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO snapshot_quarantine
+                   (snapshot_id, ticker, reason, quarantined_at)
+                   VALUES (?,?,?,?)""",
+                (snapshot_id, (ticker or "").upper() or None, reason,
+                 datetime.now().isoformat(timespec="seconds")))
+            conn.commit()
+            return True
         finally:
             conn.close()
     except Exception:
-        return None
+        return False
+
+
+def quarantine_synthetic(dry_run: bool = False) -> Dict[str, Any]:
+    """Find every snapshot whose ticker could only be synthetic and quarantine it.
+
+    Used to clean up historical test pollution without violating immutability.
+    Returns what it found (and, unless dry_run, what it quarantined).
+    """
+    conn = _conn()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT snapshot_id, ticker FROM prediction_snapshots").fetchall()]
+        already = {r[0] for r in conn.execute(
+            "SELECT snapshot_id FROM snapshot_quarantine").fetchall()}
+    finally:
+        conn.close()
+
+    found = [r for r in rows if is_synthetic_ticker(r["ticker"])]
+    todo = [r for r in found if r["snapshot_id"] not in already]
+    if not dry_run:
+        for r in todo:
+            quarantine_snapshot(r["snapshot_id"], "synthetic_ticker", r["ticker"])
+
+    by_ticker: Dict[str, int] = {}
+    for r in found:
+        by_ticker[str(r["ticker"]).upper()] = by_ticker.get(str(r["ticker"]).upper(), 0) + 1
+    return {"scanned": len(rows), "synthetic_found": len(found),
+            "newly_quarantined": 0 if dry_run else len(todo),
+            "already_quarantined": len(found) - len(todo),
+            "by_ticker": by_ticker, "dry_run": dry_run}
+
+
+def quarantine_summary() -> Dict[str, Any]:
+    """What is excluded from production evidence, and why."""
+    conn = _conn()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM snapshot_quarantine").fetchone()[0]
+        by_reason = {r[0]: r[1] for r in conn.execute(
+            "SELECT reason, COUNT(*) FROM snapshot_quarantine GROUP BY reason")}
+        by_ticker = {r[0]: r[1] for r in conn.execute(
+            "SELECT ticker, COUNT(*) FROM snapshot_quarantine GROUP BY ticker")}
+    finally:
+        conn.close()
+    return {"quarantined": total, "by_reason": by_reason, "by_ticker": by_ticker}
 
 
 def get_snapshot(snapshot_id: str) -> Optional[Dict[str, Any]]:

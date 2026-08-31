@@ -143,12 +143,25 @@ def forecast_horizons(
     analog_result: Optional[Dict[str, Any]] = None,
     atr_14: Optional[float] = None,
     horizons: Tuple[int, ...] = HORIZONS,
+    calibrators: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Probability-oriented forecast at each horizon: direction, p_up,
     bull/base/bear price scenarios, and invalidation levels.
 
     Never fabricates: with no scoreable core pillar or no current price,
     returns confidence=0 and an empty horizons dict rather than a guess.
+
+    `calibrators`: optional {horizon_days: fit_calibration() result} from
+    intelligence.calibration. This is the feedback edge — it corrects stated
+    probabilities using what actually happened to previous predictions at the
+    same horizon. Omitted (the default) leaves p_up exactly as before, so every
+    existing caller is unaffected.
+
+    Passed IN rather than loaded here on purpose: fitting reads the ledger
+    (I/O + a cross-validation pass), and this function is called per ticker
+    while the calibration is portfolio-wide — the caller fits once and reuses.
+    Direction is decided AFTER calibration, so a corrected probability is what
+    actually drives the verdict rather than a label attached to a stale number.
     """
     composite, avg_confidence = _composite_from_pillars(pillars or {})
     if composite is None or not current_price:
@@ -167,6 +180,11 @@ def forecast_horizons(
         flags.append("atr_unavailable")
     if not analog_result or analog_result.get("status") != "ok":
         flags.append("analog_unavailable")
+    if not calibrators:
+        flags.append("calibration_unavailable")
+    elif not any(c.get("applied") for c in calibrators.values()):
+        # Distinguish "never looked" from "looked and it didn't earn its place".
+        flags.append("calibration_not_applied")
 
     invalidation = _best_support_resistance(historical_context)
 
@@ -179,14 +197,37 @@ def forecast_horizons(
         decay = _decay_factor(h)
         p_h = round(max(0.05, min(0.95, 0.5 + (p - 0.5) * decay)), 3)
 
+        # Feedback edge: correct this horizon's probability using how previous
+        # predictions at the SAME horizon actually resolved. Monotonic, so the
+        # relative ranking of tickers is untouched - only stated confidence
+        # moves. No-op unless that horizon's map beat raw probabilities
+        # out-of-sample (see intelligence/calibration.fit_calibration).
+        p_raw = p_h
+        calibrated = False
+        cal = (calibrators or {}).get(h)
+        if cal:
+            try:
+                from intelligence.calibration import calibrate
+                p_cal = round(max(0.05, min(0.95, calibrate(p_h, cal))), 3)
+                calibrated = bool(cal.get("applied")) and p_cal != p_h
+                p_h = p_cal
+            except Exception:
+                pass                     # a broken map costs the correction, not the forecast
+
         direction = "UP" if p_h > 0.55 else ("DOWN" if p_h < 0.45 else "NEUTRAL")
-        horizon_forecasts[label] = {
+        entry = {
             "horizon_days": h,
             "p_up": p_h,
             "direction": direction,
             "price_range": _price_range(current_price, atr_14, p_h, h),
             "confidence": round(max(0.0, min(1.0, avg_confidence * decay)), 2),
         }
+        if calibrated:
+            # Kept so a surprising verdict can always be traced back to the
+            # uncorrected number that produced it.
+            entry["p_up_uncalibrated"] = p_raw
+            entry["calibrated"] = True
+        horizon_forecasts[label] = entry
 
     return {
         "ticker": ticker,

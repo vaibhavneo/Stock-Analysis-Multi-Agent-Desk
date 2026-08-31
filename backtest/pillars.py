@@ -286,6 +286,7 @@ def compute_pillar_scores(
     return {
         "ticker": ticker.upper(),
         "pillars": pillars,
+        "lanes": signal_lanes(pillars),
         "core_score": round(core, 1),
         "modifier_pts": round(modifiers, 2),
         "risk_multiplier": round(risk_mult, 3),
@@ -294,6 +295,79 @@ def compute_pillar_scores(
         "action": action_for(composite),
         "weights": dict(CORE_WEIGHTS),
         "modifier_max_pts": MODIFIER_MAX_PTS,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Signal lanes — the honesty split, as an interface rather than a convention
+# ══════════════════════════════════════════════════════════════════════════
+# The distinction between "this was validated" and "this can only be tracked"
+# has always been real here (the per-pillar `backtestable` flag, and
+# recommendation.py's social_research_tracked_forward_only), but it lived as a
+# convention readers had to reconstruct. Naming it makes the guarantee legible
+# at the boundary: anything in TRACKED_FORWARD is structurally incapable of
+# driving a decision on its own, and the numbers below say so explicitly.
+
+VALIDATED_LANE = ("technical", "algo", "risk")
+TRACKED_FORWARD_LANE = ("fundamentals", "research", "social")
+
+LANE_BASIS = {
+    "validated": ("Derivable bar-by-bar from price history, so the combination is "
+                  "testable through the honest stack: cost model, purged "
+                  "walk-forward, PBO, ledger-denominated dSR."),
+    "tracked_forward": ("Free data carries no usable history for these, so a "
+                        "backtest would be fiction. Bounded weight, explicit "
+                        "flags, and forward tracking through the outcomes ledger "
+                        "instead."),
+}
+
+
+def signal_lanes(pillars: Dict[str, Any]) -> Dict[str, Any]:
+    """Group the computed pillars by what kind of evidence stands behind them.
+
+    Reports the WEIGHT each lane can actually move, which is the number that
+    makes the guarantee checkable rather than merely stated: the validated lane
+    carries the core weights, while the tracked-forward lane is capped at
+    MODIFIER_MAX_PTS per pillar and cannot exceed that no matter what it says.
+    Fundamentals sits in the tracked lane but does carry core weight — it is the
+    one pillar whose lane and influence disagree, so it is called out rather
+    than quietly averaged into either side.
+    """
+    def entry(name: str) -> Dict[str, Any]:
+        p = pillars.get(name) or {}
+        return {"pillar": name, "score": p.get("score"),
+                "confidence": p.get("confidence"),
+                "backtestable": p.get("backtestable"),
+                "flags": p.get("flags", [])}
+
+    validated = [entry(n) for n in VALIDATED_LANE if n in pillars]
+    tracked = [entry(n) for n in TRACKED_FORWARD_LANE if n in pillars]
+
+    # How much of the composite each lane can actually move.
+    validated_weight = sum(CORE_WEIGHTS.get(n, 0.0) for n in VALIDATED_LANE)
+    tracked_core_weight = sum(CORE_WEIGHTS.get(n, 0.0) for n in TRACKED_FORWARD_LANE)
+    modifier_ceiling = MODIFIER_MAX_PTS * sum(
+        1 for n in ("social", "research") if n in pillars)
+
+    return {
+        "validated": {
+            "pillars": validated,
+            "core_weight": round(validated_weight, 2),
+            "basis": LANE_BASIS["validated"],
+        },
+        "tracked_forward": {
+            "pillars": tracked,
+            "core_weight": round(tracked_core_weight, 2),
+            "max_modifier_pts": round(modifier_ceiling, 1),
+            "basis": LANE_BASIS["tracked_forward"],
+        },
+        # Stated once, here, so no consumer has to infer it: fundamentals is
+        # tracked-forward evidence holding core weight. That is a deliberate
+        # v1 choice (EDGAR PIT is real, just not in the backtest path yet),
+        # not an oversight - see the module docstring.
+        "caveat": ("fundamentals carries core weight "
+                   f"({CORE_WEIGHTS.get('fundamentals', 0)}) but is not in the "
+                   "backtested path; social and research can only tilt, never drive."),
     }
 
 

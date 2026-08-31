@@ -16,3 +16,17 @@ __pycache__/
 data/recommendations.db
 data/recommendations.db-shm
 data/recommendations.db-wal
+
+# Local editor/agent config. Not secret, but machine-specific and not part of
+# the project - it appeared as untracked and would be swept in by `git add -A`.
+.claude/
+
+# Provider response cache (EDGAR companyfacts, FRED/CBOE macro, yfinance bars).
+# Regenerated on demand and rewritten by every test run or replay, so it is
+# pure churn in a diff. NOTE: some of these files were already tracked before
+# this rule existed; ignoring them here stops NEW ones being added but does not
+# untrack the existing ones - that needs a deliberate `git rm --cached`.
+financial_data/.cache/
+
+# Heartbeat run logs — local operational output, regenerated daily.
+logs/

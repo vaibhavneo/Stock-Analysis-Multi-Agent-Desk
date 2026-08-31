@@ -37,15 +37,41 @@ from agents.decision_brief import build_decision_brief
 # A stated prior (like every threshold here), not a tuned value.
 DEFAULT_MAX_WEIGHT_PCT = 25.0
 
+# Cross-position correlation: two holdings above this pairwise correlation are
+# treated as partly the same bet. Stated prior, matching backtest.risk's own
+# default — NOT fitted, and deliberately not tuned against outcomes (that would
+# be weight-shopping; see backtest/pillars.py's module docstring).
+CORR_THRESHOLD = 0.7
+# Below this many overlapping return observations a correlation estimate is
+# noise, so no haircut is applied and the holding is flagged instead.
+MIN_CORR_OBS = 30
+
+# Sector ceiling: no single sector may exceed this share of the book. Looser
+# than the per-position cap because a sector is a legitimate thesis, tighter
+# than "anything goes" because a 60%-tech book is one macro bet. Stated prior.
+DEFAULT_MAX_SECTOR_PCT = 40.0
+
 
 def build_portfolio_brief(
     holdings: List[Dict[str, Any]],
     max_weight_pct: float = DEFAULT_MAX_WEIGHT_PCT,
+    returns: Optional[Dict[str, Any]] = None,
+    max_sector_pct: float = DEFAULT_MAX_SECTOR_PCT,
 ) -> Dict[str, Any]:
     """holdings: list of dicts, each with at least:
         {"ticker", "shares", "avg_cost", "recommendation": <rec dict>}
       and optionally "backtest_all", "calibration", "xsec_ranking",
       "prediction_summary", "orchestrator_result".
+
+    returns: optional {ticker: pd.Series of daily returns}. When supplied, a
+      cross-position correlation haircut is applied to TARGET weights, so a
+      basket of names that all move together can't quietly become one oversized
+      bet that passes the per-position concentration ceiling. Omitted (the
+      default) reproduces the previous behaviour exactly.
+
+      Passed IN rather than fetched here on purpose: this module is a pure
+      consumer that creates no providers (see the module docstring), and the
+      caller already holds price history.
 
     Returns {"holdings": [<per-holding brief>...], "portfolio": {<summary>}}.
     """
@@ -72,12 +98,17 @@ def build_portfolio_brief(
                        "current_price": current_price, "mv": mv, "cost_value": cost_value})
 
     # ── Pass 2: per-holding position-aware, weight-aware brief ────────────────
+    haircuts = _correlation_haircuts([str(p["h"].get("ticker", "")).upper().strip()
+                                      for p in priced], returns)
     out_holdings: List[Dict[str, Any]] = []
     for p in priced:
         cur_weight = (100.0 * p["mv"] / total_value) if (p["mv"] and total_value) else 0.0
-        out_holdings.append(_holding_brief(p, cur_weight, max_weight_pct))
+        ticker = str(p["h"].get("ticker", "")).upper().strip()
+        out_holdings.append(_holding_brief(p, cur_weight, max_weight_pct,
+                                           haircut=haircuts.get(ticker)))
 
     portfolio = _portfolio_summary(out_holdings, total_value, total_cost, max_weight_pct)
+    portfolio["exposure"] = _exposure(out_holdings, total_value, max_sector_pct)
     portfolio["generated_at"] = now
     portfolio["max_weight_pct"] = max_weight_pct
     portfolio["disclaimer"] = ("Portfolio brief synthesized from computed outputs — "
@@ -85,10 +116,100 @@ def build_portfolio_brief(
     return {"holdings": out_holdings, "portfolio": portfolio}
 
 
+# ── Portfolio-level exposure ───────────────────────────────────────────────
+
+def _exposure(holdings: List[Dict[str, Any]], total_value: float,
+              max_sector_pct: float) -> Dict[str, Any]:
+    """Gross/net/cash exposure and sector concentration for the whole book.
+
+    This is the layer the per-position ceiling structurally cannot provide:
+    every holding can sit comfortably under its own cap while the book is
+    still a single sector bet. Long-only by design (see backtest/pillars.py),
+    so gross == net today; both are reported anyway so the shape of this
+    output does not have to change if shorts are ever added.
+
+    Invested weight is measured from CURRENT weights, not targets — this
+    describes the book as it actually stands, not as it is meant to become.
+    """
+    invested = sum(h.get("current_weight_pct") or 0.0 for h in holdings)
+    by_sector: Dict[str, float] = {}
+    unknown_sector = 0.0
+    for h in holdings:
+        w = h.get("current_weight_pct") or 0.0
+        if w <= 0:
+            continue
+        sector = ((h.get("detail_brief") or {}).get("sector")
+                  or h.get("sector") or "Unknown")
+        sector = str(sector).strip() or "Unknown"
+        by_sector[sector] = by_sector.get(sector, 0.0) + w
+        if sector == "Unknown":
+            unknown_sector += w
+
+    sectors = [{"sector": s, "weight_pct": round(w, 2),
+                "over_max": w > max_sector_pct}
+               for s, w in sorted(by_sector.items(), key=lambda kv: kv[1], reverse=True)]
+    breaches = [s for s in sectors if s["over_max"] and s["sector"] != "Unknown"]
+
+    return {
+        "gross_exposure_pct": round(invested, 2),
+        "net_exposure_pct": round(invested, 2),     # long-only: equal by construction
+        "cash_pct": round(max(0.0, 100.0 - invested), 2),
+        "max_sector_pct": max_sector_pct,
+        "by_sector": sectors,
+        "sector_breaches": breaches,
+        # Sector attribution is only as good as the sector labels; say so rather
+        # than letting an unknown-heavy book read as diversified.
+        "unclassified_weight_pct": round(unknown_sector, 2),
+        "total_value": round(total_value, 2),
+    }
+
+
+# ── Cross-position correlation ─────────────────────────────────────────────
+
+def _correlation_haircuts(tickers: List[str],
+                          returns: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    """{ticker: multiplier in (0, 1]} — how much of its standalone target weight
+    a holding keeps once overlap with the REST of the book is accounted for.
+
+    Delegates the arithmetic to backtest.risk.correlation_aware_position_size
+    rather than re-deriving it: feeding that function a uniform 1.0 per name
+    makes its output the pure haircut factor, so the portfolio layer and the
+    strategy layer provably de-duplicate correlation the same way. Two copies
+    of this formula drifting apart is exactly the bug worth designing out.
+
+    Returns {} (no adjustment anywhere) whenever correlation can't be judged:
+    no series supplied, fewer than two holdings, or too little overlapping
+    history. Silence here means "unknown", never "uncorrelated".
+    """
+    if not returns or len(tickers) < 2:
+        return {}
+    try:
+        import pandas as pd
+
+        from backtest.risk import correlation_aware_position_size
+
+        series = {t: returns[t] for t in tickers
+                  if t in returns and returns[t] is not None}
+        if len(series) < 2:
+            return {}
+        overlap = pd.DataFrame(series).dropna()
+        if len(overlap) < MIN_CORR_OBS:
+            return {}
+        adjusted = correlation_aware_position_size(
+            {t: 1.0 for t in series}, series, corr_threshold=CORR_THRESHOLD)
+        # Only meaningful haircuts are reported; 1.0 means "no overlap found".
+        return {t: float(v) for t, v in adjusted.items() if float(v) < 0.999}
+    except Exception:
+        # Correlation is an enhancement to sizing, never a precondition for
+        # producing a brief - a failure here must degrade to today's behaviour.
+        return {}
+
+
 # ── Per-holding brief ──────────────────────────────────────────────────────
 
 def _holding_brief(p: Dict[str, Any], cur_weight: float,
-                   max_weight: float) -> Dict[str, Any]:
+                   max_weight: float,
+                   haircut: Optional[float] = None) -> Dict[str, Any]:
     h, rec = p["h"], p["rec"]
     ticker = str(h.get("ticker", "")).upper().strip()
     shares, avg_cost = p["shares"], p["avg_cost"]
@@ -122,6 +243,27 @@ def _holding_brief(p: Dict[str, Any], cur_weight: float,
         }
 
     target_weight = _target_weight(rec, brief, cur_weight, max_weight)
+
+    # Correlation haircut: shrink only the ADD headroom, never below what is
+    # already held. Rationale — portfolio-level correlation has never been
+    # validated through the honest stack (no walk-forward, no dSR), so by this
+    # codebase's own rule an unvalidated signal may tilt but must not drive.
+    # Letting it push target BELOW cur_weight would manufacture TRIM/EXIT
+    # actions - real sells - off an unbacktested estimate. It stays visible in
+    # the holding and the portfolio summary either way.
+    correlation_note = None
+    if haircut is not None and target_weight > cur_weight:
+        adjusted = max(cur_weight, target_weight * haircut)
+        if adjusted < target_weight:
+            correlation_note = {
+                "haircut": round(haircut, 3),
+                "pre_correlation_target_pct": round(target_weight, 2),
+                "reason": (f"Overlaps other holdings above {CORR_THRESHOLD:.2f} "
+                           f"correlation; add headroom cut to avoid one bet held "
+                           f"under several tickers."),
+            }
+            target_weight = adjusted
+
     levels = _compute_position_levels(rec, cur_weight, max_weight)
     action = _position_action(rec, brief, cur_weight, target_weight, max_weight, levels)
     urgency = _urgency(action, rec, cur_weight, max_weight, levels)
@@ -131,6 +273,7 @@ def _holding_brief(p: Dict[str, Any], cur_weight: float,
 
     return {
         "ticker": ticker,
+        "sector": rec.get("sector") or "Unknown",   # feeds portfolio exposure
         "shares": shares,
         "avg_cost": avg_cost,
         "current_price": current_price,
@@ -142,6 +285,7 @@ def _holding_brief(p: Dict[str, Any], cur_weight: float,
         "target_weight_pct": round(target_weight, 2),
         "max_weight_pct": max_weight,
         "overweight": cur_weight > max_weight,
+        "correlation": correlation_note,
 
         "position_action": action,
         "objective_action": brief.get("objective_action"),
@@ -321,6 +465,22 @@ def _portfolio_summary(holdings: List[Dict[str, Any]], total_value: float,
         for h in ranked_by_weight[:3] if h.get("current_weight_pct", 0) > 0
     ]
 
+    # Correlation risks: named holdings whose add headroom was cut because they
+    # move with the rest of the book. Reported even when the haircut changed no
+    # action, because the concentration ceiling alone cannot see this - five
+    # names at 20% each clear every per-position check while being one bet.
+    correlation_risks = [
+        {"ticker": h["ticker"],
+         "weight_pct": h.get("current_weight_pct", 0),
+         "haircut": (h.get("correlation") or {}).get("haircut"),
+         "pre_correlation_target_pct": (h.get("correlation") or {}).get("pre_correlation_target_pct")}
+        for h in ranked_by_weight if h.get("correlation")
+    ]
+    # Correlated weight = share of the book already sitting in names that
+    # overlap each other. This is the number the per-position ceiling misses.
+    correlated_weight_pct = round(
+        sum(r["weight_pct"] for r in correlation_risks), 2)
+
     # Best supported add opportunity: an ADD with the highest objective composite.
     adds = [h for h in holdings if h["position_action"] == "ADD"]
     best_add = max(adds, key=lambda h: _composite(h), default=None)
@@ -358,6 +518,8 @@ def _portfolio_summary(holdings: List[Dict[str, Any]], total_value: float,
         "total_pl": _round(total_pl),
         "total_return_pct": _round((total_pl / total_cost * 100) if total_cost else None),
         "concentration_risks": concentration_risks,
+        "correlation_risks": correlation_risks,
+        "correlated_weight_pct": correlated_weight_pct,
         "overweight_holdings": [
             {"ticker": h["ticker"], "weight_pct": h.get("current_weight_pct", 0),
              "max_weight_pct": max_weight} for h in overweight],
