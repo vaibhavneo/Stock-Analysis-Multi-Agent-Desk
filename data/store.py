@@ -15,7 +15,35 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-_DB_PATH = Path(__file__).parent / "recommendations.db"
+def _resolve_db_path() -> Path:
+    """Where the SQLite database lives.
+
+    Defaults to data/recommendations.db next to this module, which is right for
+    local use. STOCK_AGENT_DB_PATH overrides it, and exists for hosts with an
+    ephemeral filesystem: on Railway the container disk is wiped on every
+    deploy, so the prediction ledger — the accumulated forecast/outcome
+    evidence the whole calibration layer is built on — must sit on a mounted
+    volume or it silently resets to zero on each release.
+
+    The volume CANNOT be mounted over data/ itself: this package also holds
+    store.py, ledger.py and prediction_ledger.py, and a mount there would
+    shadow them and break every import. So the override points at a path on a
+    volume mounted elsewhere (e.g. /data/recommendations.db).
+
+    The parent directory is created if missing, because a freshly attached
+    volume is an empty mount point and sqlite3 will not create intermediate
+    directories.
+    """
+    override = os.environ.get("STOCK_AGENT_DB_PATH", "").strip()
+    path = Path(override) if override else Path(__file__).parent / "recommendations.db"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass          # unwritable parent surfaces at connect() with a clearer error
+    return path
+
+
+_DB_PATH = _resolve_db_path()
 
 # Public alias for sibling modules (ledger.py) that add their own tables to the
 # SAME database. Exported rather than re-derived so the path can never drift
