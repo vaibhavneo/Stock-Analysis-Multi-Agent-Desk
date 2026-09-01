@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -157,6 +158,33 @@ def is_synthetic_ticker(ticker: Optional[str]) -> bool:
     if not ticker:
         return True                     # unnamed is not a market observation
     return str(ticker).strip().upper() in SYNTHETIC_TICKERS
+
+
+def ledger_role() -> str:
+    """"canonical" (default) or "secondary".
+
+    There must be exactly ONE canonical evidence ledger. Every deployment that
+    can freeze a prediction otherwise accumulates its own parallel history, and
+    two partial histories are worse than one: neither is complete, calibration
+    silently trains on whichever it happens to read, and the two disagree about
+    what the system predicted on a given day.
+
+    That is not hypothetical here. The hosted app freezes a snapshot on every
+    /api/recommendation call, so it had begun accumulating its own rows —
+    including the same ticker twice within five minutes, because that endpoint
+    does not pass through the heartbeat's one-per-ticker-per-day guard.
+
+    A secondary deployment stays fully functional and still records what it
+    did; its snapshots are simply quarantined at write time so they never enter
+    the evidence population that calibration and evaluation read. The rows
+    remain visible to list_snapshots, which is deliberately unfiltered, so the
+    hosted UI still shows its own history.
+    """
+    return (os.environ.get("LEDGER_ROLE", "").strip().lower() or "canonical")
+
+
+def is_canonical_ledger() -> bool:
+    return ledger_role() == "canonical"
 
 _BULLISH = {"BUY", "ACCUMULATE", "LONG"}
 _BEARISH = {"SELL", "REDUCE", "SHORT", "AVOID"}
@@ -287,6 +315,11 @@ def freeze_prediction(rec: Dict[str, Any]) -> Optional[str]:
         # but this is what stops the problem recurring.
         if is_synthetic_ticker(frozen["ticker"]):
             quarantine_snapshot(sid, "synthetic_ticker", frozen["ticker"])
+        # ONE CANONICAL LEDGER: a secondary deployment records what it did but
+        # its rows never become evidence. See ledger_role().
+        elif not is_canonical_ledger():
+            quarantine_snapshot(sid, f"non_canonical_origin:{ledger_role()}",
+                                frozen["ticker"])
         return sid
     except Exception:
         return None

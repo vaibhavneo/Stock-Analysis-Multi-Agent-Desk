@@ -251,6 +251,92 @@ def test_quarantine_synthetic_sweep_reports_and_is_repeatable():
           (pl.quarantine_summary().get("by_reason") or {}))
 
 
+# ── ONE canonical ledger ───────────────────────────────────────────────────
+
+@_tmpdb
+def test_canonical_is_the_default():
+    """An unset LEDGER_ROLE must mean canonical. A deployment that forgets the
+    variable should keep recording evidence, not silently stop."""
+    import os
+    prev = os.environ.pop("LEDGER_ROLE", None)
+    try:
+        check("default role is canonical", pl.ledger_role() == "canonical")
+        check("is_canonical_ledger agrees", pl.is_canonical_ledger() is True)
+        sid = pl.freeze_prediction(_rec("AAPL"))
+        conn = pl._conn()
+        try:
+            q = conn.execute("SELECT 1 FROM snapshot_quarantine WHERE snapshot_id=?",
+                             (sid,)).fetchone()
+        finally:
+            conn.close()
+        check("canonical rows are NOT quarantined", q is None)
+    finally:
+        if prev is not None:
+            os.environ["LEDGER_ROLE"] = prev
+
+
+@_tmpdb
+def test_secondary_deployment_never_becomes_evidence():
+    """THE Phase-2 invariant: exactly one canonical ledger. A secondary
+    deployment stays functional and records what it did, but its rows must not
+    enter the population calibration reads - otherwise two partial histories
+    compete and neither is complete."""
+    import os
+    from intelligence.calibration import _pairs_for_horizon
+
+    prev = os.environ.get("LEDGER_ROLE")
+    os.environ["LEDGER_ROLE"] = "secondary"
+    try:
+        check("role reports secondary", pl.ledger_role() == "secondary")
+        check("is_canonical_ledger is False", pl.is_canonical_ledger() is False)
+
+        before = len(_pairs_for_horizon(1))
+        sid = _seed_matured("MSFT", {1: 0.77}, 1)     # real ticker, matured
+        after = _pairs_for_horizon(1)
+
+        conn = pl._conn()
+        try:
+            row = conn.execute("SELECT reason FROM snapshot_quarantine WHERE snapshot_id=?",
+                               (sid,)).fetchone()
+            listed = conn.execute("SELECT 1 FROM prediction_snapshots WHERE snapshot_id=?",
+                                  (sid,)).fetchone()
+        finally:
+            conn.close()
+
+        check("secondary row was quarantined at write time", row is not None)
+        check("reason names the origin",
+              row is not None and "non_canonical_origin" in row["reason"],
+              str(row["reason"]) if row else "")
+        check("the snapshot still EXISTS (auditable, not dropped)", listed is not None)
+        check("it did NOT enter the calibration population",
+              len(after) == before, f"{before} -> {len(after)}")
+        check("its probability is absent from the training set",
+              all(abs(p - 0.77) > 1e-9 for p, _, _ in after))
+    finally:
+        if prev is None:
+            os.environ.pop("LEDGER_ROLE", None)
+        else:
+            os.environ["LEDGER_ROLE"] = prev
+
+
+@_tmpdb
+def test_secondary_rows_stay_visible_to_the_ui():
+    """list_snapshots is deliberately unfiltered, so a secondary deployment can
+    still show its own history even though it is not evidence."""
+    import os
+    prev = os.environ.get("LEDGER_ROLE")
+    os.environ["LEDGER_ROLE"] = "secondary"
+    try:
+        pl.freeze_prediction(_rec("NVDA"))
+        visible = [s for s in pl.list_snapshots(ticker="NVDA")]
+        check("secondary rows remain listable for the UI", len(visible) >= 1)
+    finally:
+        if prev is None:
+            os.environ.pop("LEDGER_ROLE", None)
+        else:
+            os.environ["LEDGER_ROLE"] = prev
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
