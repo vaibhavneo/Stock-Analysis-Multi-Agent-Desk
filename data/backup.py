@@ -31,6 +31,69 @@ VERIFY_TABLES = ("prediction_snapshots", "prediction_outcomes", "snapshot_quaran
 
 DEFAULT_KEEP = 14          # ~3 trading weeks of dailies
 
+# Off-machine mirror. A backup sitting on the same disk as the database it
+# protects survives a bad write; it does not survive the drive. The canonical
+# ledger lives on one laptop, so a second physical location is the difference
+# between "recoverable" and "gone". Set LEDGER_BACKUP_MIRROR to override, or
+# leave it unset and the first available cloud-synced folder is used.
+MIRROR_ENV = "LEDGER_BACKUP_MIRROR"
+_MIRROR_CANDIDATES = (
+    "~/Library/Mobile Documents/com~apple~CloudDocs/StockAgentLedgerBackups",
+    "~/OneDrive/StockAgentLedgerBackups",
+)
+
+
+def default_mirror_dir() -> Optional[Path]:
+    """First cloud-synced destination whose PARENT already exists.
+
+    Checking the parent, not the target, matters: the backup folder itself is
+    created on first use, but inventing a whole cloud root that the user has
+    not set up would silently write to a directory nothing syncs.
+    """
+    import os as _os
+    explicit = (_os.environ.get(MIRROR_ENV) or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    for cand in _MIRROR_CANDIDATES:
+        p = Path(cand).expanduser()
+        if p.parent.exists():
+            return p
+    return None
+
+
+def mirror_backup(src_path: str, mirror_dir: Optional[str] = None,
+                  keep: int = DEFAULT_KEEP) -> Dict[str, Any]:
+    """Copy a VERIFIED backup off-machine and verify the copy too.
+
+    Verified again at the destination on purpose: cloud-sync folders are a
+    common place for truncated or partially-written files, and a mirror that
+    is never opened is the same hypothesis as a backup that is never restored.
+    """
+    import shutil
+
+    out: Dict[str, Any] = {"ok": False, "path": None}
+    try:
+        target_dir = Path(mirror_dir).expanduser() if mirror_dir else default_mirror_dir()
+        if target_dir is None:
+            out["skipped"] = "no_mirror_configured"
+            return out
+        target_dir.mkdir(parents=True, exist_ok=True)
+        dest = target_dir / Path(src_path).name
+        shutil.copy2(src_path, dest)
+
+        v = verify_backup(str(dest))
+        out.update(path=str(dest), verified=v.get("ok", False),
+                   integrity_check=v.get("integrity_check"), counts=v.get("counts"))
+        out["ok"] = bool(v.get("ok"))
+        if not out["ok"]:
+            out["error"] = "mirror_verification_failed"
+            return out
+        out["pruned"] = _prune(target_dir, keep)
+        return out
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return out
+
 
 def _counts(conn: sqlite3.Connection) -> Dict[str, int]:
     out: Dict[str, int] = {}
@@ -116,6 +179,10 @@ def backup_ledger(dest_dir: Optional[str] = None, keep: int = DEFAULT_KEEP,
             return result
 
         result["pruned"] = _prune(out_dir, keep)
+
+        # Off-machine copy. A mirror failure is reported but never fails the
+        # backup: a verified local copy is still strictly better than none.
+        result["mirror"] = mirror_backup(str(dest), keep=keep)
         return result
     except Exception as e:
         result["error"] = f"{type(e).__name__}: {e}"

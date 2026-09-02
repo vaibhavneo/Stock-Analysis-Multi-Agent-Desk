@@ -187,6 +187,62 @@ def test_backup_failure_is_reported_not_raised():
     check("reason is reported", "error" in b, str(b))
 
 
+# ── off-machine mirror ─────────────────────────────────────────────────────
+
+@_tmpdb
+def test_mirror_copies_and_reverifies_off_machine():
+    """A backup on the same disk as the database survives a bad write, not a
+    drive failure. The mirrored copy is verified again at the destination
+    because cloud-sync folders are a common source of truncated files."""
+    import tempfile as tf
+
+    from data.backup import backup_ledger, mirror_backup
+    pl.freeze_prediction(_rec("LLY", price=812.4))
+    local = tf.mkdtemp(prefix="bk-")
+    mirror = tf.mkdtemp(prefix="mirror-")
+    b = backup_ledger(dest_dir=local, source_path=_TMP)
+    m = mirror_backup(b["path"], mirror_dir=mirror)
+    check("mirror succeeded", m["ok"] is True, str(m.get("error")))
+    check("mirror was re-verified at the destination", m.get("verified") is True)
+    check("mirror passed integrity_check", m.get("integrity_check") == "ok")
+    check("mirrored file exists", os.path.exists(m["path"]))
+    check("mirror carries the evidence",
+          m["counts"]["prediction_snapshots"] >= 1, str(m.get("counts")))
+
+
+@_tmpdb
+def test_absent_mirror_is_skipped_not_failed():
+    """No configured mirror must not turn a good local backup into a failure."""
+    from data.backup import mirror_backup
+    import tempfile as tf
+    open(os.path.join(tf.mkdtemp(), "x"), "w").close()
+    m = mirror_backup("/nonexistent/ledger.db", mirror_dir=None)
+    check("returns a result rather than raising", isinstance(m, dict))
+    check("not ok, but reported", m["ok"] is False)
+
+
+@_tmpdb
+def test_mirror_failure_never_fails_the_local_backup():
+    """A verified local copy is strictly better than none, so a mirror problem
+    must be reported without discarding it."""
+    import tempfile as tf
+
+    from data.backup import backup_ledger
+    pl.freeze_prediction(_rec("PEP", price=180.1))
+    local = tf.mkdtemp(prefix="bk-")
+    prev = os.environ.get("LEDGER_BACKUP_MIRROR")
+    os.environ["LEDGER_BACKUP_MIRROR"] = "/proc/nonexistent/cannot/write"
+    try:
+        b = backup_ledger(dest_dir=local, source_path=_TMP)
+        check("local backup still succeeded", b["ok"] is True, str(b.get("error")))
+        check("mirror problem is reported", (b.get("mirror") or {}).get("ok") is not True)
+    finally:
+        if prev is None:
+            os.environ.pop("LEDGER_BACKUP_MIRROR", None)
+        else:
+            os.environ["LEDGER_BACKUP_MIRROR"] = prev
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
