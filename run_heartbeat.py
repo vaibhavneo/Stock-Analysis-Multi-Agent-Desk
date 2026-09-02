@@ -69,9 +69,18 @@ def main() -> int:
     ap.add_argument("--status-only", action="store_true",
                     help="print the independence report and exit, changing nothing")
     ap.add_argument("--json", action="store_true", help="emit the full result as JSON")
+    ap.add_argument("--no-backup", action="store_true",
+                    help="skip the verified ledger backup after the run")
+    ap.add_argument("--health-only", action="store_true",
+                    help="print the flywheel health report and exit, changing nothing")
     args = ap.parse_args()
 
     from agents.heartbeat import independence_report, run_daily
+
+    if args.health_only:
+        from agents.flywheel_health import format_report, health_report
+        print(format_report(health_report()))
+        return 0
 
     if args.status_only:
         rep = independence_report()
@@ -109,6 +118,33 @@ def main() -> int:
         active = res.get("calibration_active_horizons")
         if active is not None:
             print(f"calibration active at: {active or 'no horizon yet (gate not met)'}")
+
+    # Back up the ledger AFTER the run, so the snapshot includes what was just
+    # frozen. Canonical only: a secondary deployment's rows are not evidence,
+    # so backing them up would imply they were.
+    if not args.no_backup:
+        try:
+            from data import prediction_ledger as pl
+            if pl.is_canonical_ledger():
+                from data.backup import backup_ledger
+                b = backup_ledger()
+                if b.get("ok"):
+                    print(f"backup: verified {b['path']} "
+                          f"({b.get('bytes', 0) // 1024} KB)")
+                else:
+                    print(f"backup: FAILED — {b.get('error')}", file=sys.stderr)
+            else:
+                print("backup: skipped (secondary ledger is not evidence)")
+        except Exception as e:
+            print(f"backup: FAILED — {e}", file=sys.stderr)
+
+    # Health report: monitoring only, never influences scoring or calibration.
+    try:
+        from agents.flywheel_health import format_report, health_report
+        print()
+        print(format_report(health_report()))
+    except Exception as e:
+        print(f"health report unavailable: {e}", file=sys.stderr)
 
     # A run where every ticker was already predicted today is a SUCCESS - that
     # is the idempotency guard working, not a failed cron.

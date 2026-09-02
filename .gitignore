@@ -30,3 +30,7 @@ financial_data/.cache/
 
 # Heartbeat run logs — local operational output, regenerated daily.
 logs/
+
+# Verified ledger backups (timestamped SQLite snapshots). Local durability
+# artefacts, not source; regenerated on every heartbeat run.
+data/backups/
