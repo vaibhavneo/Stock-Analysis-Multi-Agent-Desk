@@ -258,6 +258,25 @@ def freeze_prediction(rec: Dict[str, Any]) -> Optional[str]:
             "confidence": {k: v.get("level") for k, v in conf.items()},
             "confidence_scores": {k: v.get("score") for k, v in conf.items()},
             "pillars": {k: v.get("score") for k, v in (rec.get("pillars") or {}).items()},
+            # Pillar CONFIDENCE, not just score. The composite's modifier term
+            # is confidence-weighted, so without this the number cannot be
+            # reconstructed from a frozen row - only approximated.
+            "pillar_confidence": {k: v.get("confidence")
+                                  for k, v in (rec.get("pillars") or {}).items()},
+            # The composite itself, and the terms it is built from. Recording
+            # the OUTPUT of the scoring engine is evidence capture, not
+            # strategy: Phase-3 analysis asks whether composite strength
+            # predicts future excess return, and that question is unanswerable
+            # on rows where the composite was never written down. Every
+            # snapshot before this change lacks it and is excluded from
+            # composite-bucket analysis rather than back-filled, which would
+            # mean grading the engine against a number it never stated.
+            "composite": rec.get("composite"),
+            "core_score": rec.get("core_score"),
+            "modifier_pts": rec.get("modifier_pts"),
+            "risk_multiplier": rec.get("risk_multiplier"),
+            "risk_veto": rec.get("risk_veto"),
+            "conviction": rec.get("conviction"),
             "gates": {g: c.get("pass") for g, c in
                       (conf.get("statistical_edge", {}).get("checks") or {}).items()},
             "evidence_ids": rec.get("claims") or {},
