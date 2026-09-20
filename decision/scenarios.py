@@ -359,7 +359,7 @@ def build_mind_changers(thesis: Dict[str, Any], edge: Dict[str, Any],
         })
     for e in lead[:2]:
         confirmation.append({
-            "trigger": f"{e.source} strengthens further",
+            "trigger": f"Further strengthening in {e.source}",
             "measurable_as": f"{e.metric} moves further from neutral",
             "currently": e.observation,
             "category": e.category,
@@ -386,14 +386,14 @@ def build_mind_changers(thesis: Dict[str, Any], edge: Dict[str, Any],
         })
     for e in lead[:2]:
         invalidation.append({
-            "trigger": f"{e.source} flips direction",
+            "trigger": f"A reversal in {e.source}",
             "measurable_as": f"{e.metric} crosses to the opposite side of neutral",
             "currently": e.observation,
             "category": e.category,
         })
     for e in against[:1]:
         invalidation.append({
-            "trigger": f"{e.source} strengthens against the thesis",
+            "trigger": f"Further deterioration in {e.source}, against the thesis",
             "measurable_as": f"{e.metric} moves further from neutral in the opposing direction",
             "currently": e.observation,
             "category": e.category,

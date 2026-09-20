@@ -35,8 +35,10 @@ from decision.conflict import analyze_conflicts
 from decision.consistency import check_consistency
 from decision.entry import assess_entry
 from decision.evidence import build_decision_evidence, to_dicts
+from decision.horizon_plan import build_horizon_plans
 from decision.horizons import synthesize_by_horizon
 from decision.levels import build_level_map
+from decision.plain import build_plain_summary
 from decision.playbook import build_monitoring_plan, build_playbook
 from decision.position import analyze_add, build_position_context, build_risk_budget
 from decision.quality import assess_decision_quality
@@ -198,6 +200,14 @@ def build_decision_intelligence(
     # ── 12. Statistical honesty strip (Phase 17) ─────────────────────────
     honesty = _build_honesty(rec, edge, conflict, scenarios, level_map, calibration_interp)
 
+    # ── 13. Per-horizon plans — the join between horizon-tagged evidence
+    #        and timeframe-tagged levels that the engine could not previously
+    #        express. Computed after sizing so every plan carries the same
+    #        gate verdict: a longer holding period does not unlock size.
+    horizon_plans = build_horizon_plans(
+        horizon_read, items, level_map, entry, edge, position_context, sizing,
+        rec, catalysts)
+
     decision: Dict[str, Any] = {
         "ticker": ticker,
         "generated_at": now,
@@ -216,6 +226,7 @@ def build_decision_intelligence(
         "evidence": to_dicts(items),
         "evidence_count": len(items),
         "horizon_read": horizon_read,
+        "horizon_plans": horizon_plans,
         "conflict": conflict,
 
         "level_map": level_map,
@@ -255,6 +266,13 @@ def build_decision_intelligence(
     }
 
     decision["consistency"] = check_consistency(decision)
+
+    # ── 14. Plain English, built LAST from the finished object. It is a
+    #        rendering of the decision, never an input to it — which is why it
+    #        cannot describe a state the object does not hold, and why it is
+    #        deliberately excluded from the fingerprint below.
+    decision["plain"] = build_plain_summary(decision)
+
     decision["decision_fingerprint"] = _fingerprint(decision)
     return decision
 
@@ -395,6 +413,8 @@ def _fingerprint(decision: Dict[str, Any]) -> str:
         "gated": decision["sizing"]["gated"],
         "confidence": decision["confidence"]["decision_confidence"],
         "levels": [l["price"] for l in (decision["level_map"].get("ladder") or [])],
+        "horizon_stances": {p["horizon"]: p["stance"]
+                            for p in (decision.get("horizon_plans") or {}).get("plans", [])},
         "recommendation_fingerprint": (decision.get("_recommendation") or {}).get(
             "decision_fingerprint"),
     }

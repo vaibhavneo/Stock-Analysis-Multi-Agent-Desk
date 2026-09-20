@@ -2107,17 +2107,38 @@ function esc(s) {
 function diLevelColor(v) { return DI_LEVEL_COLOR[v] || 'var(--text)'; }
 function num(v, d) { return (v == null || isNaN(v)) ? '—' : Number(v).toFixed(d == null ? 2 : d); }
 
+// ── Layout primitives ────────────────────────────────────────────────────
+// The view has two registers. The ANSWER is prose and prices, sized to be read.
+// The WORKING is the audit trail — evidence weights, conflict severities, level
+// bases, confidence dimensions, honesty flags. None of it is removed, because
+// it is what makes the answer checkable; all of it is collapsed, because a
+// reader who has to scroll past it to find the answer reads neither.
+
 function diSection(title, bodyHtml, subtitle) {
   return `<div style="margin:14px 0;border-top:1px solid var(--border);padding-top:10px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">
       ${esc(title)}${subtitle ? ` <span style="text-transform:none;letter-spacing:0;opacity:.75">— ${esc(subtitle)}</span>` : ''}
     </div>${bodyHtml}</div>`;
 }
+
+// A collapsed section. Closed by default; the summary line says what is inside
+// so the reader can decide without opening it.
+function diDetails(title, subtitle, bodyHtml, open) {
+  return `<details ${open ? 'open' : ''} style="margin:8px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+    <summary style="cursor:pointer;padding:9px 12px;font-size:12px;color:var(--text);list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span><span style="color:var(--accent);margin-right:6px">▸</span><b>${esc(title)}</b>
+        ${subtitle ? `<span style="color:var(--muted);font-weight:400"> — ${esc(subtitle)}</span>` : ''}</span>
+    </summary>
+    <div style="padding:2px 12px 12px 12px">${bodyHtml}</div>
+  </details>`;
+}
+
 function diChip(label, value, color) {
   return `<div style="padding:4px 9px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);font-size:11px;white-space:nowrap">
     <span style="color:var(--muted)">${esc(label)}</span>
     <b style="color:${color || 'var(--text)'};margin-left:5px">${esc(value)}</b></div>`;
 }
+
 function diConditionList(items, icon, color) {
   if (!items || !items.length) return `<div style="font-size:11px;color:var(--muted)">None.</div>`;
   return items.map(c => {
@@ -2135,6 +2156,19 @@ function diConditionList(items, icon, color) {
       ${violated ? ` <span style="font-size:10px;color:var(--yellow)">ALREADY VIOLATED</span>` : ''}
       ${why ? `<div style="font-size:11px;color:${violated ? 'var(--yellow)' : 'var(--muted)'};margin-top:1px">${esc(why)}</div>` : ''}</span></div>`;
   }).join('');
+}
+
+// A price with its distance from today, and whether the market has actually
+// traded there. The last part is the difference between a level and a guess.
+function diPrice(zone, emptyText) {
+  if (!zone || zone.price == null) return `<span style="color:var(--muted)">${esc(emptyText || '—')}</span>`;
+  const traded = zone.traded_here_before;
+  return `<b style="color:var(--text);font-variant-numeric:tabular-nums">$${num(zone.price)}</b>
+    <span style="color:${zone.distance_pct >= 0 ? 'var(--green)' : 'var(--red)'};font-size:11px">
+      ${zone.distance_pct >= 0 ? '+' : ''}${num(zone.distance_pct, 1)}%</span>
+    <span style="font-size:10px;color:${traded ? 'var(--accent)' : 'var(--muted)'}" title="${traded
+      ? 'A price this stock has actually traded at' : 'A line calculated from past prices, not a traded price'}">
+      ${traded ? '· traded here before' : '· calculated line'}</span>`;
 }
 
 async function renderVerdictTab(pred, r) {
@@ -2182,67 +2216,131 @@ function _paintDecisionIntelligence(d) {
   const el = document.getElementById('verdictTabContent');
 
   if (d.status !== 'OK') {
-    el.innerHTML = `<div style="padding:16px;color:var(--yellow)">⚠ INSUFFICIENT_DATA — ${esc((d.decision_state || {}).headline_reason || '')}
+    el.innerHTML = `<div style="padding:16px;color:var(--yellow)">⚠ Not enough information to make a call on this one.
+      <div style="font-size:12px;color:var(--text);margin-top:6px">${esc((d.decision_state || {}).headline_reason || '')}</div>
       ${d.missing_inputs ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">Missing: ${esc(d.missing_inputs.join(', '))}</div>` : ''}</div>`;
     return;
   }
 
-  const ds = d.decision_state, th = d.thesis, ed = d.statistical_edge;
-  const rel = d.thesis_edge_relation, cf = d.conflict, lm = d.level_map || {};
-  const en = d.entry || {}, ep = d.entry_plan || {}, pb = d.playbook || {};
-  const pc = d.position_context || {}, rb = d.risk_budget || {}, add = d.add_analysis || {};
-  const conf = d.confidence || {}, q = d.quality || {}, hon = d.statistical_honesty || {};
-  const cat = d.catalysts || {}, mon = d.monitoring || {}, mc = d.mind_changers || {};
-  const cons = d.consistency || {}, sc = (d.scenarios || {}).scenarios || [];
+  const P = d.plain || {};
+  const ds = d.decision_state, hp = d.horizon_plans || {};
   const col = DI_STATE_COLOR[ds.headline_state] || 'var(--muted)';
+  const cons = d.consistency || {};
 
-  // ── 1. CURRENT STATE ──────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════
+  // THE ANSWER — plain language, one screen, no internal vocabulary.
+  // ══════════════════════════════════════════════════════════════════════
+
   let html = `
-  <div style="display:flex;align-items:flex-start;gap:16px;padding:14px 16px;background:var(--bg3);border-radius:10px;border:2px solid ${col};margin-bottom:10px;flex-wrap:wrap">
-    <div style="min-width:190px">
-      <div style="font-size:25px;font-weight:900;color:${col};line-height:1.15">${esc(ds.headline_state.replace(/_/g, ' '))}</div>
-      <div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(ds.ownership === 'OWNED' ? 'you hold this' : 'ownership not provided')}</div>
+  <div style="padding:16px 18px;background:var(--bg3);border-radius:10px;border:2px solid ${col};margin-bottom:12px">
+    <div style="font-size:26px;font-weight:900;color:${col};line-height:1.2">${esc((P.call || {}).headline || '')}</div>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:10px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">If you own it</div>
+        <div style="font-size:13px;color:var(--text);font-weight:700">${esc((P.call || {}).if_you_own_it || '')}</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">If you don't</div>
+        <div style="font-size:13px;color:var(--text);font-weight:700">${esc((P.call || {}).if_you_dont || '')}</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Price now</div>
+        <div style="font-size:13px;color:var(--text);font-weight:700;font-variant-numeric:tabular-nums">${esc(P.price || '')}</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">How much</div>
+        <div style="font-size:13px;color:${d.sizing.gated ? 'var(--red)' : 'var(--green)'};font-weight:700">${d.sizing.gated ? 'Nothing yet — see the caution below' : num(d.sizing.position_size_pct, 1) + '% of the risk budget'}</div></div>
     </div>
-    <div style="flex:1;min-width:230px">
-      <div style="font-size:13px;color:var(--text);line-height:1.5">${esc(ds.headline_reason)}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:5px">${esc(ds.headline_meaning || '')}</div>
-    </div>
-  </div>
-  <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px">
-    ${diChip('Price', '$' + num(d.current_price), 'var(--text)')}
-    ${diChip('Thesis', th.direction + ' / ' + th.strength, th.direction === 'BULLISH' ? 'var(--green)' : th.direction === 'BEARISH' ? 'var(--red)' : 'var(--yellow)')}
-    ${diChip('Statistical edge', ed.verdict.replace(/_/g, ' '), ed.demonstrated ? 'var(--green)' : 'var(--red)')}
-    ${diChip('Entry', en.status || '—', en.status === 'ATTRACTIVE' ? 'var(--green)' : (en.status === 'ACCEPTABLE' ? 'var(--yellow)' : 'var(--red)'))}
-    ${diChip('Decision confidence', conf.decision_confidence || '—', diLevelColor(conf.decision_confidence))}
-    ${diChip('Horizon', d.horizon_days + 'd', 'var(--text)')}
-    ${diChip('Size', d.sizing.gated ? '0% (gated)' : num(d.sizing.position_size_pct, 1) + '%', d.sizing.gated ? 'var(--red)' : 'var(--green)')}
+    <div style="font-size:11px;color:var(--muted);margin-top:9px">${esc((P.call || {}).ownership_note || '')}</div>
   </div>`;
 
-  // Consistency warnings, first — a contradiction the reader has to scroll for
-  // is a contradiction they will act on.
-  if ((cons.issues || []).length) {
-    html += `<div style="padding:9px 12px;background:rgba(255,234,0,.06);border:1px solid var(--yellow);border-radius:8px;margin-bottom:10px">
-      <div style="font-size:10px;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Consistency — ${esc(cons.summary)}</div>
-      ${cons.issues.map(i => `<div style="font-size:11px;color:var(--text);line-height:1.45;padding:2px 0">
-        <b style="color:${i.severity === 'ERROR' ? 'var(--red)' : i.severity === 'WARNING' ? 'var(--yellow)' : 'var(--muted)'}">${esc(i.severity)}</b>
-        ${esc(i.message)} <span style="color:var(--muted)">${esc(i.detail)}</span></div>`).join('')}
-    </div>`;
+  // Consistency errors stay above the fold. A contradiction the reader has to
+  // open a disclosure to find is a contradiction they will act on.
+  const hardIssues = (cons.issues || []).filter(i => i.severity === 'ERROR');
+  if (hardIssues.length) {
+    html += `<div style="padding:10px 12px;background:rgba(255,23,68,.08);border:1px solid var(--red);border-radius:8px;margin-bottom:12px">
+      ${hardIssues.map(i => `<div style="font-size:12px;color:var(--text);line-height:1.45">
+        <b style="color:var(--red)">Contradiction —</b> ${esc(i.message)}</div>`).join('')}</div>`;
   }
 
-  // ── 2. WHY ────────────────────────────────────────────────────────────
-  const topEvidence = (d.evidence || []).filter(e => e.direction === 'BULLISH' || e.direction === 'BEARISH')
-    .sort((a, b) => b.weight - a.weight).slice(0, 5);
+  // ── Why ────────────────────────────────────────────────────────────────
   html += diSection('Why', `
-    ${topEvidence.map(e => `<div style="font-size:12px;color:var(--text);line-height:1.5;padding:3px 0;display:flex;gap:8px">
-      <span style="color:${e.direction === 'BULLISH' ? 'var(--green)' : 'var(--red)'};flex-shrink:0;font-weight:700">${e.direction === 'BULLISH' ? '▲' : '▼'}</span>
-      <span>${esc(e.observation)}
-        <span style="font-size:10px;color:var(--muted)">[${esc(e.source)} · ${esc(e.horizon)} · weight ${num(e.weight)} · ${esc(e.validation_status)}]</span></span></div>`).join('')
-    || '<div style="font-size:11px;color:var(--muted)">No directional evidence carries weight.</div>'}
-    <div style="font-size:11px;color:var(--muted);margin-top:6px">${esc(cf.summary || '')}</div>`,
-    `${d.evidence_count} normalized evidence items`);
+    ${(P.why || []).map(w => `<div style="font-size:13px;color:var(--text);line-height:1.6;padding:2px 0">• ${esc(w)}</div>`).join('')}`);
 
-  // ── 3. THESIS vs EDGE — the separation, stated ────────────────────────
-  html += diSection('Thesis vs statistical edge', `
+  // ── Your plan, by how long you intend to hold ──────────────────────────
+  const planCard = (p) => {
+    const stanceCol = {
+      BUY_THE_DIPS: 'var(--green)', HOLD: 'var(--yellow)',
+      WAIT_FOR_LOWER: 'var(--accent)', TRIM_INTO_STRENGTH: 'var(--red)',
+      STAY_OUT: 'var(--red)', NOT_ENOUGH_EVIDENCE: 'var(--muted)',
+    }[p.stance] || 'var(--muted)';
+    const row = (label, zone, empty) =>
+      `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:12px">
+         <span style="color:var(--muted);white-space:nowrap">${esc(label)}</span>
+         <span style="text-align:right">${diPrice(zone, empty)}</span></div>`;
+    return `<div style="padding:11px 13px;background:var(--bg3);border-radius:8px;border-top:3px solid ${stanceCol}">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${esc(p.label)}</div>
+      <div style="font-size:14px;font-weight:800;color:${stanceCol};margin:2px 0 6px">${esc(p.stance_text)}</div>
+      <div style="font-size:11px;color:var(--text);line-height:1.5;margin-bottom:7px">${esc(p.why)}</div>
+      ${p.reference_levels
+        ? `<div style="font-size:11px;color:var(--muted);line-height:1.5">${esc(p.reference_levels.note)}</div>
+           ${row('For reference, support', p.reference_levels.support)}
+           ${row('For reference, resistance', p.reference_levels.resistance)}`
+        : (p.action_rows || []).map(r => row(r.label, r.zone, r.empty)).join('')}
+      ${(p.warnings || []).map(w => `<div style="font-size:10px;color:var(--yellow);margin-top:5px;line-height:1.45">⚠ ${esc(w)}</div>`).join('')}
+    </div>`;
+  };
+  html += diSection('Your plan, by how long you intend to hold', `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+      ${(hp.plans || []).map(planCard).join('')}
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5">${esc(hp.note || '')}</div>`);
+
+  // ── The three scenarios ────────────────────────────────────────────────
+  html += diSection('If it goes well, badly, or nowhere', `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+      ${(P.scenarios || []).map(s => {
+        const c = s.name === 'BULL' ? 'var(--green)' : s.name === 'BEAR' ? 'var(--red)' : 'var(--yellow)';
+        return `<div style="padding:11px 13px;background:var(--bg3);border-radius:8px;border-top:3px solid ${c}">
+          <div style="font-size:13px;font-weight:800;color:${c}">${esc(s.label)}</div>
+          ${s.price_area ? `<div style="font-size:12px;color:var(--text);font-weight:700;margin-top:3px">${esc(s.price_area)}</div>` : ''}
+          <div style="font-size:11px;color:var(--text);line-height:1.5;margin-top:5px">${esc(s.what_happens)}</div>
+          ${s.what_would_cause_it ? `<div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45">Needs: ${esc(s.what_would_cause_it)}</div>` : ''}
+          <div style="font-size:10px;color:var(--muted);margin-top:5px;font-style:italic">${esc(s.probability_text)}</div>
+        </div>`;
+      }).join('')}
+    </div>`);
+
+  // ── What would change this ─────────────────────────────────────────────
+  const t = P.triggers || {};
+  html += diSection('What would change this', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div><div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Would confirm it</div>
+        ${(t.would_confirm_it || []).map(x => `<div style="font-size:12px;color:var(--text);line-height:1.5;padding:2px 0">↑ ${esc(x)}</div>`).join('') || '<div style="font-size:11px;color:var(--muted)">Nothing tracked.</div>'}</div>
+      <div><div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Would change our mind</div>
+        ${(t.would_change_our_mind || []).map(x => `<div style="font-size:12px;color:var(--text);line-height:1.5;padding:2px 0">↓ ${esc(x)}</div>`).join('') || '<div style="font-size:11px;color:var(--muted)">Nothing tracked.</div>'}</div>
+    </div>
+    ${P.watch_for ? `<div style="font-size:12px;color:var(--text);margin-top:9px;padding:9px 11px;background:var(--bg3);border-radius:8px">
+      <b style="color:var(--accent)">What am I waiting for?</b> ${esc(P.watch_for)}</div>` : ''}`);
+
+  // ── The one caution that never collapses ───────────────────────────────
+  html += `<div style="margin:14px 0;padding:11px 13px;background:rgba(255,234,0,.06);border:1px solid var(--yellow);border-radius:8px">
+    <div style="font-size:12px;color:var(--text);line-height:1.6"><b style="color:var(--yellow)">Before you act —</b> ${esc(P.honesty || '')}</div>
+  </div>`;
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SHOW THE WORKING — everything above, and everything the engine checked
+  // to get there. Nothing here is removed; all of it is collapsed. This is
+  // what makes the answer checkable rather than merely stated.
+  // ══════════════════════════════════════════════════════════════════════
+
+  const th = d.thesis, ed = d.statistical_edge, rel = d.thesis_edge_relation;
+  const cf = d.conflict, lm = d.level_map || {}, en = d.entry || {}, ep = d.entry_plan || {};
+  const pb = d.playbook || {}, pc = d.position_context || {}, rb = d.risk_budget || {};
+  const add = d.add_analysis || {}, conf = d.confidence || {}, q = d.quality || {};
+  const hon = d.statistical_honesty || {}, cat = d.catalysts || {}, mon = d.monitoring || {};
+  const hr = d.horizon_read || {}, mc = d.mind_changers || {};
+  const sc = (d.scenarios || {}).scenarios || [];
+
+  html += `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px">
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Show the working</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:9px">Every figure behind the answer above, and every check the engine ran. Open what you want; ignore the rest.</div>`;
+
+  // ── Thesis vs edge ─────────────────────────────────────────────────────
+  html += diDetails('Thesis vs. proven edge', `${th.direction} / ${th.strength} · gate ${ed.n_gates_passed}/${ed.n_gates}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div style="padding:9px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid ${th.direction === 'BULLISH' ? 'var(--green)' : th.direction === 'BEARISH' ? 'var(--red)' : 'var(--yellow)'}">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase">Thesis</div>
@@ -2258,19 +2356,19 @@ function _paintDecisionIntelligence(d) {
     <div style="font-size:12px;color:var(--text);line-height:1.5;margin-top:8px;padding:8px 11px;background:rgba(124,58,237,.08);border-radius:8px;border:1px solid var(--accent2)">
       ${esc(rel.statement)}</div>`);
 
-  // ── 4. HORIZONS ───────────────────────────────────────────────────────
-  const hr = d.horizon_read || {};
-  // Explicit order: Flask sorts JSON keys alphabetically, which would print
-  // LONG, MEDIUM, SHORT — reading the timeline backwards.
+  // ── Evidence by horizon ────────────────────────────────────────────────
   const HORIZON_ORDER = ['SHORT', 'MEDIUM', 'LONG'];
-  html += diSection('Horizons', `
+  html += diDetails('Evidence, split by horizon', hr.dominant_horizon ? `${hr.dominant_horizon.toLowerCase()}-term driven` : 'no dominant horizon', `
     ${HORIZON_ORDER.filter(b => (hr.summaries || {})[b]).map(b => `<div style="font-size:12px;color:var(--text);line-height:1.5;padding:2px 0">• ${esc(hr.summaries[b])}</div>`).join('')}
     <div style="font-size:11px;color:var(--muted);margin-top:5px">${esc(hr.dominant_reason || '')}</div>
-    ${(hr.horizon_conflicts || []).map(c => `<div style="font-size:11px;color:var(--yellow);margin-top:4px">⚠ ${esc(c.description)}</div>`).join('')}`,
-    hr.dominant_horizon ? `${hr.dominant_horizon.toLowerCase()}-term driven` : '');
+    ${(hr.horizon_conflicts || []).map(c => `<div style="font-size:11px;color:var(--yellow);margin-top:4px">⚠ ${esc(c.description)}</div>`).join('')}
+    <div style="margin-top:9px">${(d.evidence || []).filter(e => e.direction === 'BULLISH' || e.direction === 'BEARISH')
+      .sort((a, b) => b.weight - a.weight).map(e => `<div style="font-size:11px;color:var(--text);line-height:1.5;padding:2px 0">
+      <span style="color:${e.direction === 'BULLISH' ? 'var(--green)' : 'var(--red)'};font-weight:700">${e.direction === 'BULLISH' ? '▲' : '▼'}</span>
+      ${esc(e.observation)} <span style="font-size:10px;color:var(--muted)">[${esc(e.source)} · ${esc(e.horizon)} · weight ${num(e.weight)} · ${esc(e.validation_status)}]</span></div>`).join('')}</div>`);
 
-  // ── 5. POSITION PLAYBOOK ──────────────────────────────────────────────
-  html += diSection('Position playbook', `
+  // ── Playbook ───────────────────────────────────────────────────────────
+  html += diDetails('Full position playbook', `hold / add / reduce / exit conditions · review ${pb.review_date || '—'}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:9px">
       <div style="padding:9px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid ${DI_STATE_COLOR[ds.if_owned.state] || 'var(--muted)'}">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase">If owned</div>
@@ -2283,7 +2381,6 @@ function _paintDecisionIntelligence(d) {
         <div style="font-size:11px;color:var(--text);margin-top:3px;line-height:1.45">${esc(ds.if_not_owned.reason)}</div>
       </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${esc(ds.ownership_note)}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Hold while</div>
         ${diConditionList(pb.hold_conditions, '•', 'var(--green)')}</div>
@@ -2296,55 +2393,43 @@ function _paintDecisionIntelligence(d) {
     </div>
     <div style="margin-top:9px"><div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Do NOT add if</div>
       ${diConditionList(pb.do_not_add_conditions, '✕', 'var(--red)')}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:7px">Review: <b style="color:var(--text)">${esc(pb.review_date)}</b> — ${esc(pb.review_reason)}</div>`);
+    <div style="font-size:11px;color:var(--muted);margin-top:7px">Review ${esc(pb.review_date)} — ${esc(pb.review_reason)}</div>`);
 
-  // ── 6. ADDING / AVERAGING DOWN ────────────────────────────────────────
-  if (add.status === 'OK') {
-    html += diSection('Adding to the position', `
+  // ── Adding ─────────────────────────────────────────────────────────────
+  html += diDetails('Should you add to it?',
+    add.status === 'OK' ? `${add.verdict.replace(/_/g, ' ').toLowerCase()} · ${add.add_kind.replace(/_/g, ' ').toLowerCase()}` : 'no position given',
+    add.status === 'OK' ? `
       <div style="padding:9px 11px;background:${add.cheaper_not_better ? 'rgba(255,23,68,.08)' : 'var(--bg3)'};border-radius:8px;border:1px solid ${add.cheaper_not_better ? 'var(--red)' : 'var(--border)'}">
-        <div style="font-size:13px;font-weight:800;color:${add.verdict === 'ADD_CONDITIONALLY' ? 'var(--green)' : 'var(--red)'}">${esc(add.verdict.replace(/_/g, ' '))} <span style="font-size:11px;font-weight:400;color:var(--muted)">(${esc(add.add_kind.replace(/_/g, ' ').toLowerCase())})</span></div>
+        <div style="font-size:13px;font-weight:800;color:${add.verdict === 'ADD_CONDITIONALLY' ? 'var(--green)' : 'var(--red)'}">${esc(add.verdict.replace(/_/g, ' '))}</div>
         <div style="font-size:12px;color:var(--text);margin-top:3px;line-height:1.45">${esc(add.headline)}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:5px;font-style:italic">${esc(add.rule)}</div>
       </div>
       ${(add.blockers || []).length ? `<div style="margin-top:7px">${diConditionList(add.blockers.map(b => ({ condition: b })), '✕', 'var(--red)')}</div>` : ''}
-      <details style="margin-top:7px"><summary style="cursor:pointer;font-size:11px;color:var(--accent)">The ten checks</summary>
-        <div style="margin-top:5px">${(add.checks || []).map(c => `<div style="font-size:11px;color:var(--text);padding:2px 0">
-          <span style="color:var(--muted)">${esc(c.question)}</span> <b>${esc(c.answer)}</b>
-          <div style="font-size:10px;color:var(--muted)">${esc(c.detail)}</div></div>`).join('')}</div></details>`,
-      'cheaper is not the same as better');
-  } else {
-    html += diSection('Adding to the position',
-      `<div style="font-size:12px;color:var(--muted)">${esc(add.message || pc.message || 'POSITION CONTEXT NOT PROVIDED')}</div>`,
-      'POSITION CONTEXT NOT PROVIDED');
-  }
+      <div style="margin-top:7px">${(add.checks || []).map(c => `<div style="font-size:11px;color:var(--text);padding:2px 0">
+        <span style="color:var(--muted)">${esc(c.question)}</span> <b>${esc(c.answer)}</b>
+        <div style="font-size:10px;color:var(--muted)">${esc(c.detail)}</div></div>`).join('')}</div>`
+      : `<div style="font-size:12px;color:var(--muted)">${esc(add.message || pc.message || '')}</div>`);
 
-  // ── 7. ENTRY MAP — the level ladder ───────────────────────────────────
-  if (lm.status === 'OK') {
-    const rows = (lm.ladder || []).map(l => {
-      const isPrice = false;
-      const kindCol = l.kind === 'SUPPORT' ? 'var(--green)' : l.kind === 'RESISTANCE' ? 'var(--red)' : 'var(--yellow)';
-      const basisCol = l.basis === 'TRADED_PRICE' ? 'var(--accent)' : 'var(--muted)';
-      return `<tr>
-        <td style="padding:3px 8px 3px 0;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">$${num(l.price)}</td>
-        <td style="padding:3px 8px;color:${kindCol};font-size:11px">${esc(l.kind)}</td>
-        <td style="padding:3px 8px;color:${l.distance_pct >= 0 ? 'var(--green)' : 'var(--red)'};font-size:11px;font-variant-numeric:tabular-nums">${l.distance_pct >= 0 ? '+' : ''}${num(l.distance_pct, 1)}%</td>
-        <td style="padding:3px 8px;color:${basisCol};font-size:10px">${esc(l.basis)}</td>
-        <td style="padding:3px 8px;color:var(--muted);font-size:10px">${esc((l.sources || []).join(', '))}</td>
-        <td style="padding:3px 0;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums">${num(l.confidence)}</td></tr>`;
-    }).join('');
-    html += diSection('Entry map', `
+  // ── Level ladder ───────────────────────────────────────────────────────
+  html += diDetails('Every price level, and where it came from',
+    lm.status === 'OK' ? `${lm.n_observed} of ${lm.n_levels} are prices actually traded at` : 'not available',
+    lm.status === 'OK' ? `
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
           <th style="text-align:left;padding:0 8px 4px 0">Level</th><th style="text-align:left;padding:0 8px 4px">Kind</th>
           <th style="text-align:left;padding:0 8px 4px">Distance</th><th style="text-align:left;padding:0 8px 4px">Basis</th>
           <th style="text-align:left;padding:0 8px 4px">Sources</th><th style="text-align:left;padding:0 0 4px">Conf</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>
+        <tbody>${(lm.ladder || []).map(l => `<tr>
+          <td style="padding:3px 8px 3px 0;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">$${num(l.price)}</td>
+          <td style="padding:3px 8px;color:${l.kind === 'SUPPORT' ? 'var(--green)' : l.kind === 'RESISTANCE' ? 'var(--red)' : 'var(--yellow)'};font-size:11px">${esc(l.kind)}</td>
+          <td style="padding:3px 8px;color:${l.distance_pct >= 0 ? 'var(--green)' : 'var(--red)'};font-size:11px;font-variant-numeric:tabular-nums">${l.distance_pct >= 0 ? '+' : ''}${num(l.distance_pct, 1)}%</td>
+          <td style="padding:3px 8px;color:${l.basis === 'TRADED_PRICE' ? 'var(--accent)' : 'var(--muted)'};font-size:10px">${esc(l.basis)}</td>
+          <td style="padding:3px 8px;color:var(--muted);font-size:10px">${esc((l.sources || []).join(', '))}</td>
+          <td style="padding:3px 0;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums">${num(l.confidence)}</td></tr>`).join('')}</tbody></table></div>
       <div style="margin-top:9px;padding:9px 11px;background:var(--bg3);border-radius:8px">
         <div style="font-size:12px;color:var(--text);line-height:1.5"><b style="color:${en.status === 'ATTRACTIVE' ? 'var(--green)' : en.status === 'ACCEPTABLE' ? 'var(--yellow)' : 'var(--red)'}">${esc(en.status)}</b> — ${esc(en.reason)}</div>
-        ${ep.supported
-          ? `<div style="font-size:12px;color:var(--text);margin-top:5px">${esc(ep.instruction)} <span style="font-size:10px;color:var(--muted)">[${esc(ep.band_basis || '')}, R:R ${num(ep.reward_risk, 1)}]</span></div>`
-          : `<div style="font-size:11px;color:var(--muted);margin-top:5px">${esc(ep.why_no_band || '')}</div>`}
-        <div style="font-size:11px;color:${d.sizing.gated ? 'var(--red)' : 'var(--green)'};margin-top:5px">${esc(d.sizing.statement)}</div>
+        ${ep.supported ? `<div style="font-size:12px;color:var(--text);margin-top:5px">${esc(ep.instruction)}</div>`
+                       : `<div style="font-size:11px;color:var(--muted);margin-top:5px">${esc(ep.why_no_band || '')}</div>`}
       </div>
       ${(en.conditions || []).map(c => `<div style="margin-top:7px;padding:8px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--accent)">
         <div style="font-size:11px;font-weight:700;color:var(--accent)">${esc(c.label)}</div>
@@ -2353,52 +2438,34 @@ function _paintDecisionIntelligence(d) {
       ${(en.avoid_conditions || []).map(c => `<div style="margin-top:7px;padding:8px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--red)">
         <div style="font-size:11px;font-weight:700;color:var(--red)">AVOID — ${esc(c.label)}</div>
         ${(c.any_of || []).map(a => `<div style="font-size:11px;color:var(--text);padding:1px 0">— ${esc(a)}</div>`).join('')}
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(c.why)}</div></div>`).join('')}`,
-      `${lm.n_observed} of ${lm.n_levels} levels are prices the market actually traded at`);
-  } else {
-    html += diSection('Entry map', `<div style="font-size:12px;color:var(--muted)">${esc(lm.reason || 'No levels could be sourced.')}</div>`);
-  }
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(c.why)}</div></div>`).join('')}`
+    : `<div style="font-size:12px;color:var(--muted)">${esc(lm.reason || 'No levels could be sourced.')}</div>`);
 
-  // ── 8. SCENARIOS ──────────────────────────────────────────────────────
-  html += diSection('Scenario tree', sc.map(s => `
-    <div style="margin-bottom:8px;padding:9px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid ${s.name === 'BULL' ? 'var(--green)' : s.name === 'BEAR' ? 'var(--red)' : s.name === 'BASE' ? 'var(--yellow)' : 'var(--accent2)'}">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-        <div style="font-size:12px;font-weight:800;color:var(--text)">${esc(s.name)} <span style="font-size:10px;font-weight:400;color:var(--muted)">${esc(s.expected_direction)} · ${esc(s.horizon_days)}d</span></div>
-        <div style="font-size:10px;color:${s.probability != null ? 'var(--green)' : 'var(--muted)'}">
-          ${s.probability != null ? 'Probability ' + num(s.probability * 100, 0) + '% (' + esc(s.probability_basis) + ')' : 'Probability not calibrated'}</div>
-      </div>
+  // ── Full scenarios ─────────────────────────────────────────────────────
+  html += diDetails('Full scenario detail', `${sc.length} scenarios · ${(d.scenarios || {}).any_probability_stated ? 'one calibrated probability' : 'no calibrated probability'}`,
+    sc.map(s => `<div style="margin-bottom:8px;padding:9px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid ${s.name === 'BULL' ? 'var(--green)' : s.name === 'BEAR' ? 'var(--red)' : s.name === 'BASE' ? 'var(--yellow)' : 'var(--accent2)'}">
+      <div style="font-size:12px;font-weight:800;color:var(--text)">${esc(s.name)} <span style="font-size:10px;font-weight:400;color:var(--muted)">${esc(s.expected_direction)} · ${esc(s.horizon_days)}d</span></div>
       <div style="font-size:12px;color:var(--text);line-height:1.45;margin-top:3px">${esc(s.thesis)}</div>
       ${(s.price_levels || []).length ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Levels: ${(s.price_levels || []).map(l => `$${num(l.price)} (${l.distance_pct >= 0 ? '+' : ''}${num(l.distance_pct, 1)}%, ${esc(l.basis)})`).join(' · ')}</div>` : ''}
       ${(s.conditions || []).length ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Conditions: ${(s.conditions || []).map(esc).join('; ')}</div>` : ''}
       <div style="font-size:11px;color:var(--muted);margin-top:3px">Invalidated by: ${esc(s.invalidation)}</div>
       <div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">${esc(s.probability_detail || s.uncertainty || '')}</div>
-    </div>`).join(''), (d.scenarios || {}).probability_policy ? 'probabilities shown only when calibrated' : '');
+    </div>`).join(''));
 
-  // ── 9. WHAT CHANGES MY MIND ───────────────────────────────────────────
-  html += diSection('What changes the decision', `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div><div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Confirmation</div>
-        ${diConditionList(mc.confirmation, '↑', 'var(--green)')}</div>
-      <div><div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Invalidation</div>
-        ${diConditionList(mc.invalidation, '↓', 'var(--red)')}</div>
-    </div>`);
-
-  // ── 10. CATALYSTS ─────────────────────────────────────────────────────
-  html += diSection('Catalysts', cat.status === 'OK' ? `
-    <div style="font-size:12px;color:var(--text);margin-bottom:6px">What am I waiting for? <b>${esc(cat.waiting_for)}</b></div>
-    ${(cat.events || []).slice(0, 4).map(e => `<div style="padding:8px 11px;background:var(--bg3);border-radius:8px;margin-bottom:6px">
+  // ── Catalysts ──────────────────────────────────────────────────────────
+  html += diDetails('Catalyst calendar', cat.status === 'OK' ? cat.waiting_for : 'not available',
+    cat.status === 'OK' ? `${(cat.events || []).slice(0, 4).map(e => `<div style="padding:8px 11px;background:var(--bg3);border-radius:8px;margin-bottom:6px">
       <div style="font-size:12px;color:var(--text)"><b>${esc(e.date)}</b> — ${esc(e.event)} <span style="font-size:10px;color:var(--muted)">(${esc(e.days_away)}d, relevance ${esc(e.relevance)})</span></div>
       <div style="font-size:11px;color:var(--green);margin-top:2px">Bull: ${esc(e.bull_implication)}</div>
       <div style="font-size:11px;color:var(--red);margin-top:1px">Bear: ${esc(e.bear_implication)}</div>
       <div style="font-size:10px;color:var(--muted);margin-top:2px">Uncertainty: ${esc(e.uncertainty)}</div>
       ${e.history ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${esc(e.history.statement)}</div>` : ''}
-    </div>`).join('')}
-    <div style="font-size:10px;color:var(--muted)">${esc(cat.disclaimer || '')}</div>`
-    : `<div style="font-size:12px;color:var(--muted)">${esc(cat.waiting_for || 'No catalyst calendar available.')}</div>`);
+    </div>`).join('')}<div style="font-size:10px;color:var(--muted)">${esc(cat.disclaimer || '')}</div>`
+    : `<div style="font-size:12px;color:var(--muted)">${esc(cat.waiting_for || '')}</div>`);
 
-  // ── 11. RISK ──────────────────────────────────────────────────────────
+  // ── Risk ───────────────────────────────────────────────────────────────
   const prisk = rb.position_risk || {};
-  html += diSection('Risk', `
+  html += diDetails('Risk detail', `invalidation ${rb.invalidation_level != null ? '$' + num(rb.invalidation_level) : 'not priced'} · volatility ${(rb.volatility || {}).vol_regime || '—'}`, `
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:7px">
       ${diChip('Invalidation', rb.invalidation_level != null ? '$' + num(rb.invalidation_level) + ' (' + num(rb.risk_to_invalidation_pct, 1) + '%)' : 'not priced', rb.invalidation_level != null ? 'var(--text)' : 'var(--muted)')}
       ${diChip('Basis', rb.invalidation_basis || '—', rb.invalidation_basis === 'TRADED_PRICE' ? 'var(--accent)' : 'var(--muted)')}
@@ -2409,7 +2476,7 @@ function _paintDecisionIntelligence(d) {
       ${diChip('Concentration', pc.concentration || 'not computable', pc.concentration === 'CONCENTRATED' ? 'var(--red)' : 'var(--text)')}
     </div>
     ${prisk.status === 'POSITION_SIZING_NOT_COMPUTABLE'
-      ? `<div style="font-size:11px;color:var(--muted)">POSITION SIZING NOT COMPUTABLE — ${esc(prisk.reason || '')}</div>`
+      ? `<div style="font-size:11px;color:var(--muted)">${esc(prisk.reason || '')}</div>`
       : `<div style="font-size:11px;color:var(--text)">
            Dollars at risk to invalidation: <b>${prisk.dollars_at_risk_to_invalidation != null ? '$' + num(prisk.dollars_at_risk_to_invalidation) : 'not computable'}</b>
            · Portfolio risk if invalidated: <b>${prisk.portfolio_risk_if_invalidated_pct != null ? num(prisk.portfolio_risk_if_invalidated_pct) + '%' : 'not computable'}</b>
@@ -2421,10 +2488,9 @@ function _paintDecisionIntelligence(d) {
         ${(pc.observations || []).map(o => `<div style="color:var(--muted);margin-top:3px">${esc(o)}</div>`).join('')}</div>`
       : `<div style="font-size:11px;color:var(--muted);margin-top:6px">${esc(pc.message || '')}</div>`}`);
 
-  // ── 12. EVIDENCE CONFLICT ─────────────────────────────────────────────
-  html += diSection('Evidence conflict', `
+  // ── Conflicts ──────────────────────────────────────────────────────────
+  html += diDetails('Where the evidence disagrees', `${cf.consensus ? cf.consensus.replace(/_/g, ' ').toLowerCase() : '—'} · ${cf.n_conflicts || 0} named`, `
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
-      ${diChip('Consensus', cf.consensus || '—', cf.consensus === 'CONFLICTED' ? 'var(--red)' : cf.consensus === 'STRONG_AGREEMENT' ? 'var(--green)' : 'var(--yellow)')}
       ${diChip('Agreement', cf.agreement_ratio != null ? num(cf.agreement_ratio * 100, 0) + '%' : '—')}
       ${diChip('Bullish weight', num(cf.bullish_weight), 'var(--green)')}
       ${diChip('Bearish weight', num(cf.bearish_weight), 'var(--red)')}
@@ -2438,33 +2504,30 @@ function _paintDecisionIntelligence(d) {
     ${(cf.evidence_quality_issues || []).length ? `<div style="font-size:11px;color:var(--yellow);margin-top:4px">
       ${cf.evidence_quality_issues.map(qq => `<div>⚠ ${esc(qq.detail)}</div>`).join('')}</div>` : ''}`);
 
-  // ── 13. CONFIDENCE + QUALITY ──────────────────────────────────────────
-  html += diSection('Confidence, decomposed', `
+  // ── Confidence + quality ───────────────────────────────────────────────
+  html += diDetails('How confident, and in what', `overall ${conf.decision_confidence || '—'} · ${q.summary || ''}`, `
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Confidence, decomposed</div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
       ${Object.entries(conf.dimensions || {}).map(([k, v]) => diChip(k, v.level, diLevelColor(v.level))).join('')}
       ${diChip('DECISION', conf.decision_confidence, diLevelColor(conf.decision_confidence))}
     </div>
     <div style="font-size:11px;color:var(--muted);line-height:1.5">${esc(conf.rule || '')}
       ${(conf.capped_by || []).length ? ` Capped by: <b style="color:var(--text)">${esc((conf.capped_by || []).join(', '))}</b>.` : ''}</div>
-    <details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--accent)">Per-dimension detail</summary>
-      ${Object.entries(conf.dimensions || {}).map(([k, v]) => `<div style="font-size:11px;padding:3px 0">
-        <b style="color:${diLevelColor(v.level)}">${esc(k)}: ${esc(v.level)}</b>
-        <div style="color:var(--muted)">${esc(v.detail || v.basis || '')}</div></div>`).join('')}</details>`);
-
-  html += diSection('Decision quality', `
+    ${Object.entries(conf.dimensions || {}).map(([k, v]) => `<div style="font-size:11px;padding:3px 0">
+      <b style="color:${diLevelColor(v.level)}">${esc(k)}: ${esc(v.level)}</b>
+      <div style="color:var(--muted)">${esc(v.detail || v.basis || '')}</div></div>`).join('')}
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">Decision quality</div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
       ${Object.entries(q.components || {}).map(([k, v]) => diChip(k, v.status, diLevelColor(v.status))).join('')}
     </div>
-    <div style="font-size:11px;color:var(--text)">${esc(q.summary || '')}</div>
-    <details style="margin-top:5px"><summary style="cursor:pointer;font-size:11px;color:var(--accent)">Component detail</summary>
-      ${Object.entries(q.components || {}).map(([k, v]) => `<div style="font-size:11px;padding:3px 0">
-        <b style="color:${diLevelColor(v.status)}">${esc(k)}: ${esc(v.status)}</b>
-        <div style="color:var(--muted)">${esc(v.explanation)} <span style="opacity:.7">[${esc(v.provenance)}]</span></div></div>`).join('')}</details>
-    <div style="font-size:10px;color:var(--muted);margin-top:5px;font-style:italic">${esc(q.note || '')}</div>`, 'not a single number, deliberately');
+    ${Object.entries(q.components || {}).map(([k, v]) => `<div style="font-size:11px;padding:3px 0">
+      <b style="color:${diLevelColor(v.status)}">${esc(k)}: ${esc(v.status)}</b>
+      <div style="color:var(--muted)">${esc(v.explanation)} <span style="opacity:.7">[${esc(v.provenance)}]</span></div></div>`).join('')}
+    <div style="font-size:10px;color:var(--muted);margin-top:5px;font-style:italic">${esc(q.note || '')}</div>`);
 
-  // ── 14. STATISTICAL HONESTY ───────────────────────────────────────────
+  // ── Statistical honesty ────────────────────────────────────────────────
   const ss = hon.sample_size || {}, dsr = hon.deflated_sharpe || {}, bts = hon.backtest_status || {}, mt = hon.multiple_testing || {};
-  html += diSection('Statistical honesty', `
+  html += diDetails('Backtest, calibration and the fine print', `${hon.demonstrated_edge ? 'edge demonstrated' : 'no demonstrated edge'} · ${(hon.statements || []).length} caveats`, `
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
       ${diChip('Demonstrated edge', hon.demonstrated_edge ? 'YES' : 'NO', hon.demonstrated_edge ? 'var(--green)' : 'var(--red)')}
       ${diChip('dSR', num(dsr.value) + ' / ' + num(dsr.bar, 1) + ' bar', dsr.clears_bar ? 'var(--green)' : 'var(--red)')}
@@ -2481,9 +2544,9 @@ function _paintDecisionIntelligence(d) {
     <div style="font-size:11px;color:var(--text);margin-top:3px">${esc((hon.levels || {}).statement || '')}</div>
     ${(hon.statements || []).map(s => `<div style="font-size:11px;color:var(--yellow);margin-top:3px">⚠ ${esc(s)}</div>`).join('')}`);
 
-  // ── 15. MONITORING PLAN ───────────────────────────────────────────────
-  html += diSection('Monitoring plan', `
-    <div style="font-size:11px;color:var(--muted);margin-bottom:5px">Review ${esc(mon.review_date)} (every ${esc(mon.cadence_days)} days) — ${esc(mon.review_reason)}</div>
+  // ── Monitoring ─────────────────────────────────────────────────────────
+  html += diDetails('What to check, and when', `review ${mon.review_date || '—'}, every ${mon.cadence_days || '—'} days`, `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:5px">${esc(mon.review_reason || '')}</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">
       <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
         <th style="text-align:left;padding:0 8px 4px 0">Check</th><th style="text-align:left;padding:0 8px 4px">When</th>
@@ -2494,27 +2557,33 @@ function _paintDecisionIntelligence(d) {
         <td style="padding:3px 8px;color:var(--text)">${esc(c.changes_state_if)}</td>
         <td style="padding:3px 0;color:${c.automatable ? 'var(--green)' : 'var(--muted)'}">${c.automatable ? 'yes' : 'manual'}</td></tr>`).join('')}</tbody></table></div>`);
 
-  // ── 16. NARRATIVE (optional, validated) ───────────────────────────────
-  html += `<div style="margin:14px 0;border-top:1px solid var(--border);padding-top:10px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Written explanation</div>
-      <button onclick="loadDiNarrative('${esc(d.ticker)}')" id="diNarrativeBtn"
-        style="background:var(--bg3);border:1px solid var(--border);color:var(--accent);padding:5px 11px;border-radius:6px;font-size:11px;cursor:pointer">
-        Generate (LLM explains the object above — it cannot change it)</button>
-    </div>
-    <div id="diNarrative" style="font-size:12px;color:var(--text);line-height:1.6;margin-top:7px"></div>
-  </div>`;
+  // ── Consistency (warnings; errors already shown above the fold) ────────
+  if ((cons.issues || []).length) {
+    html += diDetails('Internal consistency checks', cons.summary || '',
+      (cons.issues || []).map(i => `<div style="font-size:11px;color:var(--text);line-height:1.45;padding:3px 0">
+        <b style="color:${i.severity === 'ERROR' ? 'var(--red)' : i.severity === 'WARNING' ? 'var(--yellow)' : 'var(--muted)'}">${esc(i.severity)}</b>
+        ${esc(i.message)} <span style="color:var(--muted)">${esc(i.detail)}</span></div>`).join(''));
+  }
 
-  // ── Footer: provenance + the other tabs ───────────────────────────────
+  // ── LLM narrative ──────────────────────────────────────────────────────
+  html += diDetails('A longer written explanation', 'written by a model, then checked number by number against the data above', `
+    <button onclick="loadDiNarrative('${esc(d.ticker)}')" id="diNarrativeBtn"
+      style="background:var(--bg3);border:1px solid var(--border);color:var(--accent);padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer">Generate</button>
+    <div id="diNarrative" style="font-size:12px;color:var(--text);line-height:1.6;margin-top:8px"></div>`);
+
+  html += `</div>`;   // close "Show the working"
+
+  // ── Footer ─────────────────────────────────────────────────────────────
   html += `<div style="font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px;margin-top:12px;line-height:1.5">
     Numbers from <b>${esc((d.authority || {}).numbers_from || '')}</b>. LLM role: <b>${esc((d.authority || {}).llm_role || '')}</b>.
-    Per-agent narratives (Fundamentals · Technical · Social · Algo) remain in the tabs above — this view is the synthesis, not a repeat of them.
+    Per-agent narratives (Fundamentals · Technical · Social · Algo) remain in the tabs above.
     <div style="margin-top:4px">${esc(d.disclaimer || '')}</div>
     <div style="margin-top:4px;opacity:.7">fingerprint ${esc(d.decision_fingerprint)}${d.journal_id ? ' · journaled ' + esc(String(d.journal_id).slice(0, 12)) : ''}${d._cached ? ' · cached' : ''}</div>
   </div>`;
 
   el.innerHTML = html;
 }
+
 
 async function loadDiNarrative(ticker) {
   const box = document.getElementById('diNarrative');
