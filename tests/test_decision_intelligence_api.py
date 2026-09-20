@@ -157,6 +157,32 @@ def test_no_order_placement_route_exists():
     check("no order/trade/execute route exists", not offenders, offenders)
 
 
+def test_verdict_card_contains_long_prose_instead_of_stretching():
+    """A regression net for a real layout bug.
+
+    `entry_price` is typed as a string in PREDICTION_SCHEMA, and
+    agents/synthesis.py only replaces it with a computed number when a
+    backtested strategy agrees with the call. When none does, the model's own
+    sentence survives — and it was being rendered into an ~86px centred grid
+    tile, which wrapped it to two words a line and stretched the row to roughly
+    330px. There is no JS test harness in this repo, so this asserts the four
+    structural guards are present in the served page.
+    """
+    _, c = _client()
+    html = c.get("/").data.decode()
+    checks = {
+        "prose is routed away from the tiles": "_priceOrProse" in html,
+        "a full-width home for prose exists": 'id="predConditionNote"' in html,
+        "grid tracks cannot be widened by content":
+            "repeat(3, minmax(0, 1fr))" in html,
+        "tiles clamp rather than grow": "-webkit-line-clamp" in html,
+        "the card has room": "380px minmax(0, 1fr)" in html,
+        "it stacks on narrow screens": "@media (max-width: 1100px)" in html,
+    }
+    for label, present in checks.items():
+        check(label, present)
+
+
 def test_status_endpoint_does_not_publish_a_key_prefix():
     """An unauthenticated endpoint was returning the first 8 characters of the
     DeepSeek key. The prefix is the identifying half; a suffix is enough to tell

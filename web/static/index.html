@@ -68,7 +68,8 @@
 
   /* Dashboard */
   .dashboard { display: none; }
-  .top-row { display: grid; grid-template-columns: 320px 1fr; gap: 16px; margin-bottom: 16px; }
+  .top-row { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 1100px) { .top-row { grid-template-columns: 1fr; } }
   .mid-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   .full-row { margin-bottom: 16px; }
@@ -90,14 +91,37 @@
   .verdict-company { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
   .verdict-price { font-size: 28px; font-weight: 900; margin-bottom: 4px; }
   .verdict-change { font-size: 13px; }
-  .price-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 14px; }
-  .price-item { background: var(--bg3); border-radius: 8px; padding: 10px; text-align: center; }
-  .price-item .label { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-  .price-item .value { font-size: 14px; font-weight: 700; }
+  /* minmax(0, 1fr) rather than 1fr: a plain 1fr track has an automatic minimum
+     of its content's size, so one long string in one tile widens that column
+     and squeezes the other two. This makes the three tracks genuinely equal
+     whatever lands in them. */
+  .price-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+  .price-item { background: var(--bg3); border-radius: 8px; padding: 10px 8px; text-align: center; min-width: 0; }
+  .price-item .label { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; white-space: nowrap; }
+  /* Last-resort containment. Long values belong in .price-note below the grid,
+     but if one ever reaches a tile it wraps and clips instead of forcing the
+     row to 300px tall. */
+  /* break-word, not anywhere: `anywhere` also shrinks the element's intrinsic
+     minimum size, which made "medium-term" wrap onto two lines inside a tile
+     wide enough to hold it and left the second row 18px taller than the first. */
+  .price-item .value { font-size: 14px; font-weight: 700; line-height: 1.3; overflow-wrap: break-word;
+                       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* Word-valued tiles (Horizon, and a conditional Entry) are categories, not
+     figures. At the 14px numeric size "medium-term" needs 95px inside a 91px
+     tile and wraps at the hyphen, which pushed its whole grid row 18px taller
+     than the one above it. */
+  .price-item .value.text { font-size: 12px; font-weight: 600; }
+  .price-item .value.conditional { font-size: 12px; font-weight: 600; color: var(--accent); }
+  /* Where prose goes: full width, left-aligned, sized to be read. */
+  .price-note { margin-top: 8px; padding: 9px 11px; background: var(--bg3); border-radius: 8px;
+                border-left: 3px solid var(--accent); font-size: 11.5px; line-height: 1.55; color: var(--text); }
+  .price-note + .price-note { margin-top: 6px; }
+  .price-note .price-note-label { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                                  letter-spacing: .5px; margin-bottom: 2px; }
   .price-item .value.green { color: var(--green); }
   .price-item .value.red { color: var(--red); }
   .price-item .value.yellow { color: var(--yellow); }
-  .conviction-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .conviction-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
   .conviction-label { font-size: 11px; color: var(--muted); }
   .conviction-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
   .conviction-badge.HIGH { background: rgba(0,230,118,.2); color: var(--green); }
@@ -483,6 +507,7 @@
               <div class="value accent" id="predHorizon">--</div>
             </div>
           </div>
+          <div id="predConditionNote"></div>
           <div class="conviction-row">
             <span class="conviction-label">Conviction:</span>
             <span class="conviction-badge" id="convictionBadge">--</span>
@@ -1632,6 +1657,37 @@ function renderQuickData(q) {
   ft.innerHTML = fRows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }
 
+// A value that is meant to be a price but may arrive as a sentence.
+// Accepts "51.58", "$51.58", "$1,234.00"; anything else is treated as prose.
+const _PRICE_RE = /^\s*\$?\s*-?\d[\d,]*(?:\.\d+)?\s*$/;
+
+function _priceOrProse(v) {
+  if (v == null || v === '') return { tile: '--', prose: null, isPrice: false };
+  const s = String(v).trim();
+  if (_PRICE_RE.test(s)) {
+    return { tile: s.startsWith('$') ? s : '$' + s, prose: null, isPrice: true };
+  }
+  return { tile: 'Conditional', prose: s, isPrice: false };
+}
+
+function _setPriceTile(id, parsed) {
+  const el = document.getElementById(id);
+  el.textContent = parsed.tile;
+  el.classList.toggle('conditional', !parsed.isPrice && parsed.prose != null);
+  // The tile is clamped to two lines, so the full text stays reachable on hover
+  // as well as in the note below.
+  el.title = parsed.prose || '';
+}
+
+function _renderPriceNotes(pairs) {
+  const box = document.getElementById('predConditionNote');
+  if (!box) return;
+  const notes = pairs.filter(([, p]) => p.prose);
+  box.innerHTML = notes.map(([label, p]) => `<div class="price-note">
+      <div class="price-note-label">${esc(label)} — conditional</div>${esc(p.prose)}</div>`).join('');
+  box.style.display = notes.length ? 'block' : 'none';
+}
+
 function renderFullResult(r) {
   // Update chart ticker label
   document.getElementById('chartTicker').textContent = r.ticker;
@@ -1653,12 +1709,28 @@ function renderFullResult(r) {
     chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '% today';
     chgEl.className = 'verdict-change ' + (chg >= 0 ? 'green' : 'red');
   }
-  document.getElementById('predEntry').textContent = pred.entry_price || '--';
-  document.getElementById('predTarget').textContent = pred.target_price || '--';
-  document.getElementById('predStop').textContent = pred.stop_loss || '--';
+  // entry_price / target_price / stop_loss are typed as strings in
+  // PREDICTION_SCHEMA, and agents/synthesis.py only overrides them with
+  // computed numbers when a backtested strategy actually agrees with the call.
+  // When none does, the model's own sentence survives — "No current entry;
+  // await a volume-backed breakout above $55.75 or a failed-bounce short
+  // trigger below $49.20". That is a useful sentence and a terrible table
+  // cell. Prices stay in the grid; prose moves to a full-width note under it.
+  const _entry  = _priceOrProse(pred.entry_price);
+  const _target = _priceOrProse(pred.target_price);
+  const _stop   = _priceOrProse(pred.stop_loss);
+  _setPriceTile('predEntry', _entry);
+  _setPriceTile('predTarget', _target);
+  _setPriceTile('predStop', _stop);
+  _renderPriceNotes([['Entry', _entry], ['Target', _target], ['Stop loss', _stop]]);
   document.getElementById('predUpside').textContent = pred.upside_pct != null ? '+' + pred.upside_pct + '%' : (pred.upside_pct || '--');
-  document.getElementById('predRR').textContent = pred.risk_reward || '--';
-  document.getElementById('predHorizon').textContent = (pred.time_horizon || '--').replace(/\s*\(.*\)/, '');
+  const _rrEl = document.getElementById('predRR');
+  _rrEl.textContent = pred.risk_reward || '--';
+  _rrEl.classList.toggle('text', String(pred.risk_reward || '').length > 6);
+  const _horizonEl = document.getElementById('predHorizon');
+  _horizonEl.textContent = (pred.time_horizon || '--').replace(/\s*\(.*\)/, '');
+  _horizonEl.classList.add('text');
+  _horizonEl.title = pred.time_horizon || '';
   const cb = document.getElementById('convictionBadge');
   cb.textContent = pred.conviction || '--';
   cb.className = 'conviction-badge ' + (pred.conviction || 'MEDIUM');
