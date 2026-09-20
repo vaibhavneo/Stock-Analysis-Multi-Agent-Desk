@@ -27,8 +27,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def make_df(kind: str, n: int = 1400, seed: int = 7) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     drift = {"up": 0.0015, "down": -0.0015, "flat": 0.0}[kind]

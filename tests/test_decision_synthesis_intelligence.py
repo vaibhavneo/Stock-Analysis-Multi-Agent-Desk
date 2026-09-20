@@ -26,8 +26,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def _mock_rec(action="BUY", composite=72, risk_veto=False, gated=False, stat_level="HIGH"):
     return {
         "ticker": "TEST", "generated_at": "2026-07-22T12:00:00", "current_price": 100.0,

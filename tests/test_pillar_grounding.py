@@ -40,8 +40,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 SAMPLE_PILLAR = {"score": 62.5, "formula": "mean(rsi, macd, sma voting)"}
 
 BUILDER_CASES = [

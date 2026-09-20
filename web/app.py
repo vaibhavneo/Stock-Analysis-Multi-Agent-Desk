@@ -950,6 +950,253 @@ def decision_brief_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Decision Intelligence ─────────────────────────────────────────────────
+#
+# One evidence snapshot -> one synthesis object -> many UI sections. The
+# expensive enrichments (the strategy-library race and the universe-wide
+# cross-sectional ranking) are OFF by default: neither changes the decision
+# state, and together they dominate this endpoint's latency. `deep: true`
+# turns them on for a caller that wants the relative-rank section populated.
+
+_DI_CACHE: dict = {}
+_DI_CACHE_TTL_SEC = 300
+
+
+def _di_cache_key(ticker, period, deep, position, max_risk):
+    pos = tuple(sorted((position or {}).items())) if position else None
+    return (ticker, period, bool(deep), pos, max_risk)
+
+
+def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = False,
+                                 position=None, max_portfolio_risk_pct=None,
+                                 include_narrative: bool = False):
+    """Gather every input once, then synthesize once."""
+    import warnings as _w
+    _w.filterwarnings("ignore")
+    from tools.market_data import (fetch_price_history, fetch_fundamentals,
+                                   fetch_reddit_sentiment, fetch_stocktwits_sentiment,
+                                   compute_indicators, compute_signal_summary,
+                                   compute_algo_signals)
+    from agents.recommendation import build_recommendation
+    from agents.fundamentals_pit import analyze_fundamentals_pit
+    from agents.decision_synthesis import (_interpret_backtest, _interpret_calibration,
+                                           _interpret_xsec)
+    from intelligence.historical_context import compute_historical_context
+    from intelligence.evidence_synthesis import detect_contradictions
+    from decision.catalysts import build_catalyst_timeline
+    from decision.engine import build_decision_intelligence as _build
+    from decision import journal as _journal
+
+    df = fetch_price_history(ticker, period=period)
+    fund = fetch_fundamentals(ticker)
+    ind = compute_indicators(df)
+    ss = compute_signal_summary(ind)
+    algo = compute_algo_signals(df, ind)
+    try:
+        pit = analyze_fundamentals_pit(ticker, run_id="decision-intel")
+    except Exception:
+        pit = None
+    try:
+        reddit = fetch_reddit_sentiment(ticker)
+    except Exception:
+        reddit = None
+    try:
+        stocktwits = fetch_stocktwits_sentiment(ticker)
+    except Exception:
+        stocktwits = None
+
+    rec = build_recommendation(ticker, df, ind, ss, algo, fund, pit=pit,
+                               reddit=reddit, stocktwits=stocktwits,
+                               run_id="decision-intel")
+
+    # Market regime and historical context are cheap relative to the
+    # recommendation itself and both feed decision-relevant sections, so they
+    # always run.
+    try:
+        hist_ctx = compute_historical_context(ticker, df, algo, ind)
+    except Exception:
+        hist_ctx = None
+    try:
+        from intelligence.regime import compute_market_regime
+        regime = compute_market_regime()
+    except Exception:
+        regime = None
+
+    calibration = None
+    try:
+        from data import prediction_ledger as _pl
+        calibration = _pl.calibration_report(horizon=20)
+    except Exception:
+        pass
+
+    xsec_ranking = None
+    backtest_all = None
+    if deep:
+        backtest_all = _build_backtest_all(ticker, df)
+        try:
+            from xsection import ranking as _xr
+            xsec_ranking = _xr.run_ranking(
+                rec.get("data_asof") or datetime.now().strftime("%Y-%m-%d"),
+                universe_id="production-pilot", persist=False)
+        except Exception:
+            xsec_ranking = None
+
+    try:
+        catalysts = build_catalyst_timeline(
+            ticker, rec.get("current_price"), (rec.get("levels") or {}).get("atr_14"))
+    except Exception:
+        catalysts = None
+
+    try:
+        prior = _journal.latest_decision(ticker)
+    except Exception:
+        prior = None
+
+    decision = _build(
+        ticker, rec,
+        indicators=ind, algo_signals=algo, historical_context=hist_ctx, regime=regime,
+        xsec_interp=_interpret_xsec(ticker, xsec_ranking),
+        calibration_interp=_interpret_calibration(calibration, None),
+        backtest_interp=_interpret_backtest(rec, backtest_all),
+        pillar_contradictions=detect_contradictions(rec.get("pillars"), regime=regime),
+        catalysts=catalysts, position=position, prior_decision=prior,
+        max_portfolio_risk_pct=max_portfolio_risk_pct,
+        llm_prose=rec.get("thesis"))
+
+    # Journal every generated decision. Append-only and content-addressed, so
+    # repeated views of the same page do not create duplicate rows.
+    try:
+        decision["journal_id"] = _journal.journal_decision(decision)
+    except Exception:
+        decision["journal_id"] = None
+
+    if include_narrative:
+        try:
+            from decision.narrative import generate_narrative
+            decision["narrative"] = generate_narrative(decision)
+        except Exception as e:
+            decision["narrative"] = {"status": "ERROR", "text": None,
+                                     "message": str(e)[:200]}
+
+    return decision
+
+
+@app.route("/api/decision-intelligence", methods=["POST"])
+def decision_intelligence_endpoint():
+    """The Decision Intelligence view.
+
+    Body: {ticker, period?, deep?, avg_cost?, shares?, portfolio_value?,
+           max_portfolio_risk_pct?, narrative?}
+
+    Position fields are optional and are NEVER inferred: omitting them yields
+    POSITION_CONTEXT_NOT_PROVIDED and both ownership branches, rather than an
+    assumed holding.
+    """
+    data = request.json or {}
+    ticker = (data.get("ticker") or "").upper().strip()
+    if not ticker:
+        return jsonify({"error": "No ticker"}), 400
+    period = data.get("period", "5y")
+    deep = bool(data.get("deep", False))
+    include_narrative = bool(data.get("narrative", False))
+
+    position = None
+    avg_cost = data.get("avg_cost")
+    if avg_cost is not None:
+        try:
+            avg_cost = float(avg_cost)
+            if avg_cost > 0:
+                position = {"avg_cost": avg_cost}
+                for key in ("shares", "portfolio_value"):
+                    if data.get(key) is not None:
+                        position[key] = float(data[key])
+        except (TypeError, ValueError):
+            position = None
+
+    max_risk = data.get("max_portfolio_risk_pct")
+    try:
+        max_risk = float(max_risk) if max_risk is not None else None
+    except (TypeError, ValueError):
+        max_risk = None
+
+    key = _di_cache_key(ticker, period, deep, position, max_risk)
+    import time as _time
+    cached = _DI_CACHE.get(key)
+    if cached and (_time.time() - cached[0]) < _DI_CACHE_TTL_SEC and not include_narrative:
+        out = dict(cached[1])
+        out["_cached"] = True
+        return jsonify(out)
+
+    try:
+        decision = _build_decision_intelligence(
+            ticker, period, deep, position, max_risk, include_narrative)
+        if not include_narrative:
+            _DI_CACHE[key] = (_time.time(), decision)
+        return jsonify(decision)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/decision-journal")
+def decision_journal_endpoint():
+    """Read the append-only decision journal. Read-only by construction — the
+    table's own triggers reject UPDATE and DELETE."""
+    from decision import journal as _journal
+    ticker = (request.args.get("ticker") or "").upper().strip() or None
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    try:
+        rows = _journal.list_decisions(ticker, limit=limit)
+        for r in rows:
+            r.pop("frozen_json", None)
+            r.pop("evidence_snapshot_json", None)
+        return jsonify({"summary": _journal.summary(), "decisions": rows})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/decision-journal/forward")
+def decision_forward_endpoint():
+    """Forward validation of journaled decisions. `refresh=1` re-evaluates
+    against current prices first (network I/O, so it is opt-in)."""
+    from decision import forward as _forward
+    try:
+        horizon = int(request.args.get("horizon", 20))
+    except (TypeError, ValueError):
+        horizon = 20
+    out = {}
+    if request.args.get("refresh") == "1":
+        try:
+            out["refresh"] = _forward.refresh_outcomes(
+                (request.args.get("ticker") or "").upper().strip() or None)
+        except Exception as e:
+            out["refresh"] = {"error": str(e)[:200]}
+    try:
+        out["validation"] = _forward.summarize_forward_validation(horizon)
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/position-rules", methods=["POST"])
+def position_rules_endpoint():
+    """Backtest the position-management rules (Phase 24). Slow and deliberately
+    not cached — it is a research run, not a page section."""
+    data = request.json or {}
+    tickers = data.get("tickers") or ([data["ticker"]] if data.get("ticker") else [])
+    if not tickers:
+        return jsonify({"error": "No ticker(s)"}), 400
+    try:
+        from backtest.position_rules import evaluate_across_tickers
+        result = evaluate_across_tickers([t.upper().strip() for t in tickers])
+        result.pop("per_ticker", None)   # large; available per-ticker on request
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/portfolio-brief", methods=["POST"])
 def portfolio_brief_endpoint():
     """Portfolio Decision Brief v2 — a position- and weight-aware action plan per

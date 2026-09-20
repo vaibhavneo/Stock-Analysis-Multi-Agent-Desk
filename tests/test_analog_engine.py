@@ -31,8 +31,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def _random_block(n, drift, vol, start_price, seed):
     rng = np.random.default_rng(seed)
     return start_price * np.exp(np.cumsum(rng.normal(drift, vol, n)))

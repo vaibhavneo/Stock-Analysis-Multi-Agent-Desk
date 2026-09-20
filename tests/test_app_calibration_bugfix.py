@@ -33,8 +33,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def test_no_predictionledger_class_reference_remains():
     import inspect
     source = inspect.getsource(app_module._gather_cheap_enrichments)

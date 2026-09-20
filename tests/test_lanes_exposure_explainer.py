@@ -28,8 +28,9 @@ def check(label, condition, detail=""):
     else:
         FAIL += 1
         print(f"  FAIL: {label} {detail}")
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, label
 def _pillars_fixture():
     return compute_pillar_scores(
         "TEST",

@@ -37,8 +37,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 DRAFT = {
     "action": "BUY", "conviction": "HIGH", "time_horizon": "medium-term (1-3 months)",
     "time_horizon_days": 90, "entry_price": "$100", "target_price": "$120",

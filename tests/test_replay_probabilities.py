@@ -30,8 +30,9 @@ def check(label, condition, detail=""):
     else:
         FAIL += 1
         print(f"  FAIL: {label} {detail}")
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, label
 def _prices(n=300, start=50.0):
     idx = pd.date_range("2024-01-01", periods=n, freq="B")
     return pd.Series([start + i * 0.1 for i in range(n)], index=idx)

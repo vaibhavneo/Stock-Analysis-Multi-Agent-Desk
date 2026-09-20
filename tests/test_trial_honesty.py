@@ -42,8 +42,9 @@ def check(name: str, condition: bool, detail: str = ""):
     print(f"  {name:58s} {'OK' if condition else 'FAIL'}  {detail}")
     if not condition:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, name
 def test_engine_guard():
     print("=== 1. Engine guard: n_trials < 1 must raise, not flatter ===")
     from backtest.engine import deflated_sharpe_ratio as dsr

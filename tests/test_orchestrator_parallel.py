@@ -34,8 +34,9 @@ def check(name, cond, detail=""):
     print(f"  {name:58s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def _noop_progress(stage, msg):
     pass
 

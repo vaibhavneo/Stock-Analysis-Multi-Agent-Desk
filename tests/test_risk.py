@@ -29,8 +29,9 @@ def check(name: str, condition: bool, detail: str = ""):
     print(f"  {name:60s} {status}  {detail}")
     if not condition:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, name
 # ══════════════════════════════════════════════════════════════════════════
 # 1. Book ground-truth: the S&P 500's own Kelly fraction comes out to ~4.5
 #    (Hilpisch p.293), computed with a near-zero risk-free rate. Reproducing a

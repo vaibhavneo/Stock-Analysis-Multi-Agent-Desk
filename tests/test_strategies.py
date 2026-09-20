@@ -23,8 +23,9 @@ def check(name: str, condition: bool, detail: str = ""):
     print(f"  {name:65s} {status}  {detail}")
     if not condition:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, name
 # ══════════════════════════════════════════════════════════════════════════
 # 1. Every strategy: valid signal values, runs cleanly through the engine.
 # ══════════════════════════════════════════════════════════════════════════

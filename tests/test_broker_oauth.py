@@ -25,8 +25,9 @@ def check(name, cond, detail=""):
     print(f"  {name:58s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def test_pkce_rfc7636_vector():
     """RFC 7636 Appendix B's own worked example: an independent recomputation
     of the S256 algorithm (base64url(sha256(verifier)), no padding) must

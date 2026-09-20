@@ -20,8 +20,9 @@ def check(label, condition):
     else:
         FAIL += 1
         print(f"  FAIL: {label}")
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, label
 def _mock_rec(action="BUY", composite=72, risk_veto=False, gated=False,
               stat_level="HIGH", dsr=0.7, sharpe=0.5, max_dd=0.15):
     return {

@@ -33,8 +33,9 @@ def check(name, cond, detail=""):
     print(f"  {name:64s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 # ── 1. Production provider is BLOCKED without a license ──────────────────────
 
 def test_provider_blocked():

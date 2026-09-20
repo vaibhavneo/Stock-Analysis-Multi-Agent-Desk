@@ -20,8 +20,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 ALGO = {"historical_volatility_20d": 22.5, "historical_volatility_60d": 19.0,
         "vol_regime": "MEDIUM", "vol_expanding": False}
 LEVELS = {"entry_zone_low": 98.0, "entry_zone_high": 101.0, "stop_loss": 90.0,

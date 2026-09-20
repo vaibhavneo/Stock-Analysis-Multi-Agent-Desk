@@ -27,8 +27,9 @@ def check(name, cond, detail=""):
     print(f"  {name:58s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 class FakeMCPClient:
     """Stands in for broker.mcp_client.MCPClient. call_tool_results maps
     tool name -> the raw tools/call 'result' object (before this module's

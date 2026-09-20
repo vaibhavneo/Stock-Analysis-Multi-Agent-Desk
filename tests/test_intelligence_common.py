@@ -30,8 +30,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def test_is_stale_recent_is_not_stale():
     recent = datetime.now(timezone.utc).isoformat()
     check("a timestamp from right now is not stale", is_stale(recent, max_age_days=5) is False)

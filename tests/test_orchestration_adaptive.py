@@ -31,8 +31,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 # ── plan_sections: pure logic, no mocking needed ────────────────────────
 
 def test_preset_names_resolve_exactly():

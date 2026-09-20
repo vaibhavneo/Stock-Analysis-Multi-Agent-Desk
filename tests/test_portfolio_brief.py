@@ -21,8 +21,9 @@ def check(label, condition):
     else:
         FAIL += 1
         print(f"  FAIL: {label}")
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, label
 def _rec(ticker="TEST", action="BUY", composite=72, risk_veto=False, gated=False,
          stat_level="HIGH", alloc_level="HIGH", dsr=0.7, current_price=100.0,
          size_pct=6.0, levels=True, target=112.0, stop=94.0):

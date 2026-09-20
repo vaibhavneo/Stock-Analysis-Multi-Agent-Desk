@@ -39,8 +39,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 # The exact top-level keys analyze_stock() returned BEFORE this session's
 # work. Hardcoded deliberately: this is the contract the plan promised to
 # keep byte-identical, so it must be asserted against a frozen list, not

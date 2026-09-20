@@ -32,8 +32,9 @@ def check(name, cond, detail=""):
     print(f"  {name:66s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 FAKE_REC = {
     "ticker": "TEST", "current_price": 100.0, "sector": "Technology", "regime": "MEDIUM",
     "action": "BUY", "composite": 72,

@@ -35,8 +35,9 @@ def check(name, cond, detail=""):
     print(f"  {name:56s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def test_pbo_detects_noise():
     print("=== 1. PBO is HIGH for best-of-pure-noise (the overfit case) ===")
     rng = np.random.default_rng(7)

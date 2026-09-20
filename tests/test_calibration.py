@@ -29,8 +29,9 @@ def check(label, condition, detail=""):
     else:
         FAIL += 1
         print(f"  FAIL: {label} {detail}")
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert condition, label
 def _with_dates(pairs, step_days=1, start="2020-01-01"):
     """Attach call dates to (p, o) pairs. Daily spacing keeps windows
     non-overlapping at the short horizons these tests use."""

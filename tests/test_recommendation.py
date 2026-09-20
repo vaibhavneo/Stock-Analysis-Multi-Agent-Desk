@@ -34,8 +34,9 @@ def check(name, cond, detail=""):
     print(f"  {name:58s} {'OK' if cond else 'FAIL'}  {detail}")
     if not cond:
         FAILURES.append(name)
-
-
+    # Fails the process, not just the transcript: a check that only prints
+    # leaves a pytest run green regardless of what it found.
+    assert cond, name
 def setup_dbs():
     """Isolate BOTH stores. The ledger has a public override; the store's path
     is module-level, so the test points it at a temp file directly."""
