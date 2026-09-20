@@ -330,3 +330,80 @@ Baseline: 416 tests. After: **510 tests, 0 failures.**
    eventually disagree with the first.
 7. **The 30-decision minimum for forward inference is a stated prior**, chosen
    to match the existing calibration floor, not derived from a power analysis.
+
+---
+
+## Phase 31 — Production readiness, verified on the live service
+
+Deployed to Railway project `Stock-AI-Agent-VG`, service `Agentic-AI`,
+`https://agentic-ai-production-aea7.up.railway.app`, from
+`Stock-Analysis-Multi-Agent-Desk @ seven-agent-desk`.
+
+| Check | Evidence | Status |
+|---|---|---|
+| No secrets committed | `git diff --cached` scanned for `sk-`, `api_key=`, `secret=`, `token=`; `.env` is gitignored and not staged | PASS |
+| No debug code | `decision/`, `backtest/position_rules.py` scanned for `pdb`, `breakpoint(`, bare `print(`, `if True:` | PASS |
+| No test bypasses | 30 soft `check()` helpers now assert; a deliberate mutation to `decision_brief.py` fails 3 tests that previously passed | PASS |
+| No fake probabilities | `test_no_probability_without_calibration`; live INTC on production reports `any_probability_stated: False` | PASS |
+| No fabricated price levels | Live production INTC: 5 of 9 ladder levels are `TRADED_PRICE`, each naming its sources | PASS |
+| No fabricated catalysts | Live: one dated earnings event from the provider calendar; nothing else invented | PASS |
+| No LLM-only numerical decisions | `validate_narrative` rejected a live DeepSeek first attempt and accepted the retry with all 86 numbers verified against the object | PASS |
+| No broker execution | `test_no_order_placement_route_exists` asserts no route contains order/buy/sell/trade/execute/place | PASS |
+| No broken agent tabs | Fundamentals / Technical / Social / Algo untouched; `/api/quick`, `/api/decision-brief`, `/api/calibration`, `/api/predictions`, `/api/datasources`, `/api/macro`, `/api/universes`, `/api/trials`, `/api/strategies` all 200 on production | PASS |
+| No safeguards removed | The statistical gate, dSR bar, quarantine rules and snapshot immutability triggers are unchanged; the decision layer reads them | PASS |
+| Deployment health | Gunicorn booted clean, two workers, no application errors in the logs | PASS |
+| Decision Intelligence page | `/` returns 200 and carries the new tab; live INTC with a position returned `REDUCE` (owned) vs `WATCH` (not owned) | PASS |
+| API health | `/api/decision-intelligence`, `/api/decision-journal`, `/api/decision-journal/forward` all live | PASS |
+| Journal persistence | The production smoke-test decision was journaled and reads back | PASS |
+
+### One extra finding, fixed
+
+`/api/status` is unauthenticated and was returning the first eight characters of
+the DeepSeek key. The prefix is the identifying half, so publishing it narrowed
+a search for no benefit — the field exists only so a human can confirm which key
+is loaded. It now returns a four-character suffix, with a test covering it.
+
+### Production behaviour worth knowing
+
+Railway's ledger is separate from the local one, so `calibration n = 0` there
+and the CALIBRATION quality component reads MISSING. That is correct: the
+service reports that it has no measured track record rather than borrowing the
+local one. The evidence flywheel runs locally, as it did before this change.
+
+### Old versus new, same ticker, same moment
+
+Live INTC at $108.60, holding 100 shares at $135 in a $50,000 portfolio:
+
+**Before** — one verb, one entry band around the quote, three bullets:
+
+> WATCH — the company screens acceptably (composite 67.0) but statistical edge
+> is MEDIUM and/or allocation is gated — not enough proof yet to size a position.
+> Entry $105.80–$110.00. Max exposure: unsupported.
+> • Statistical edge is MEDIUM (dSR 0.00 vs 0.5 bar)
+> • No mature live track record yet
+> • Position sizing is gated to 0%
+
+The entry band contained the current price, so it could only say yes. The −19.6%
+position was not mentioned at all.
+
+**After** — two different problems, answered separately:
+
+> **IF OWNED: REDUCE** — at the invalidation level this position would cost
+> 2.41% of the stated portfolio, against a 2.00% stated budget.
+> **IF NOT OWNED: WATCH** — bullish thesis and a workable entry location
+> (ACCEPTABLE), but the statistical gate has not cleared, so position size
+> remains 0%.
+>
+> Thesis BULLISH/MODERATE (+1.19) vs edge NO_DEMONSTRATED_EDGE (4/5 gates) —
+> *"These are different claims… the thesis can justify watching and planning; it
+> cannot justify sizing."*
+>
+> Short term bullish (+1.00), medium term bullish (+1.00), **long term bearish
+> (−1.00)** — a horizon conflict the single composite had averaged away.
+>
+> ADDING: **DO NOT ADD (averaging down)** — *"CHEAPER, NOT BETTER: the price is
+> lower, the case is not stronger."*
+>
+> Nine sourced levels, five of them prices the market actually traded at.
+> Invalidation at $96.56. Waiting for: earnings on 2026-10-22.
+> Every scenario: "Probability not calibrated."
