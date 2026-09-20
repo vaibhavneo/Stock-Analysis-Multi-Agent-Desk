@@ -157,6 +157,18 @@ def test_no_order_placement_route_exists():
     check("no order/trade/execute route exists", not offenders, offenders)
 
 
+def test_status_endpoint_does_not_publish_a_key_prefix():
+    """An unauthenticated endpoint was returning the first 8 characters of the
+    DeepSeek key. The prefix is the identifying half; a suffix is enough to tell
+    a human which key is loaded."""
+    _, c = _client()
+    d = c.get("/api/status").get_json()
+    preview = d.get("key_preview")
+    if preview:
+        check("preview does not start with a key prefix", not preview.startswith("sk-"))
+        check("preview is a short suffix", len(preview) <= 8, preview)
+
+
 def test_journal_endpoint_is_read_only():
     app_mod, c = _client()
     r = c.get("/api/decision-journal?limit=5")

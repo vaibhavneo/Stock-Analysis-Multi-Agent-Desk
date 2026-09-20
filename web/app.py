@@ -63,10 +63,14 @@ def index():
 @app.route("/api/status")
 def status():
     key = _get_api_key()
+    # Last four characters only. The prefix of an API key is the half that
+    # identifies it to a provider; publishing it on an unauthenticated endpoint
+    # narrows a brute-force search for no benefit. A suffix is enough for a
+    # human to confirm WHICH key is configured, which is all this field is for.
     return jsonify({
         "ok": bool(key),
         "key_set": bool(key),
-        "key_preview": (key[:8] + "...") if key else None,
+        "key_preview": ("..." + key[-4:]) if key else None,
         "model": "deepseek-v4-pro",
     })
 
