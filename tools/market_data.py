@@ -383,7 +383,8 @@ def _last(series) -> float | None:
 
 # ── Algorithmic Trading Signals ────────────────────────────────────────────
 
-def compute_algo_signals(df: pd.DataFrame, indicators: dict) -> dict:
+def compute_algo_signals(df: pd.DataFrame, indicators: dict,
+                         asset_class: str = "EQUITY") -> dict:
     """
     Mathematical / quantitative trading signals:
     - Mean reversion (Z-score)
@@ -478,15 +479,25 @@ def compute_algo_signals(df: pd.DataFrame, indicators: dict) -> dict:
     )
 
     # ── Volatility Regime (historical volatility)
+    # Annualized on the asset's OWN calendar. A 24/7 asset annualized on 252
+    # days reads ~20% less volatile than it is (sqrt(365/252) = 1.204), and
+    # that understatement flows straight into option prices, position sizes
+    # and stop distances — all of which still look plausible. The regime
+    # bands are per-class for the same reason: on equity's 40/20 thresholds
+    # every coin is permanently HIGH and every currency permanently LOW.
+    from mas.asset_class import spec_for, vol_regime as _vol_regime
+    _spec = spec_for(asset_class)
+    _ann = math.sqrt(_spec.days_per_year)
     returns = close.pct_change().dropna()
-    hv_20 = float(returns.tail(20).std() * math.sqrt(252) * 100) if len(returns) >= 20 else 0
-    hv_60 = float(returns.tail(60).std() * math.sqrt(252) * 100) if len(returns) >= 60 else hv_20
+    hv_20 = float(returns.tail(20).std() * _ann * 100) if len(returns) >= 20 else 0
+    hv_60 = float(returns.tail(60).std() * _ann * 100) if len(returns) >= 60 else hv_20
     result["historical_volatility_20d"] = round(hv_20, 2)
     result["historical_volatility_60d"] = round(hv_60, 2)
-    result["vol_regime"] = (
-        "HIGH"   if hv_20 > 40 else
-        "MEDIUM" if hv_20 > 20 else "LOW"
-    )
+    result["annualization_days"] = _spec.days_per_year
+    result["vol_bands"] = {"high_above": _spec.vol_high_pct,
+                           "medium_above": _spec.vol_medium_pct,
+                           "asset_class": _spec.asset_class}
+    result["vol_regime"] = _vol_regime(hv_20, asset_class)
     result["vol_expanding"] = hv_20 > hv_60 * 1.1
 
     # ── Monte Carlo Simulation (Geometric Brownian Motion, 1000 paths, 30 days)
@@ -494,9 +505,22 @@ def compute_algo_signals(df: pd.DataFrame, indicators: dict) -> dict:
     result.update(mc_result)
 
     # ── Volume-Price Divergence
-    if len(close) >= 5 and len(volume) >= 5:
+    # Guarded on a ZERO 20-day mean volume, not just a NaN one. Spot FX and
+    # index series carry volume=0 on every bar, and the unguarded division
+    # raised ZeroDivisionError — a crash, not a degraded answer. Where there
+    # is no volume there is no volume signal, and saying so is the honest
+    # result; inventing NEUTRAL would claim the check ran.
+    _vol_mean_20 = volume.rolling(20).mean().iloc[-1] if len(volume) >= 1 else float("nan")
+    _has_volume = (len(volume) >= 5 and not pd.isna(_vol_mean_20)
+                   and float(_vol_mean_20) > 0)
+    if not _has_volume:
+        result["volume_price_signal"] = None
+        result["volume_price_reason"] = (
+            "this series carries no volume, so volume confirmation cannot be "
+            "computed")
+    if len(close) >= 5 and _has_volume:
         price_chg_5d = (float(close.iloc[-1]) - float(close.iloc[-6])) / float(close.iloc[-6]) if len(close) > 5 else 0
-        vol_chg_5d   = (float(volume.iloc[-1]) - float(volume.rolling(20).mean().iloc[-1])) / float(volume.rolling(20).mean().iloc[-1]) if not pd.isna(volume.rolling(20).mean().iloc[-1]) else 0
+        vol_chg_5d   = (float(volume.iloc[-1]) - float(_vol_mean_20)) / float(_vol_mean_20)
         if price_chg_5d > 0.02 and vol_chg_5d > 0.5:
             result["volume_price_signal"] = "CONFIRMED_BREAKOUT"
         elif price_chg_5d > 0.02 and vol_chg_5d < -0.2:

@@ -114,6 +114,7 @@ def compute_pillar_scores(
     stocktwits: Optional[Dict[str, Any]] = None,
     pit: Optional[Dict[str, Any]] = None,
     strict_fundamentals: bool = False,
+    asset_class: str = "EQUITY",
 ) -> Dict[str, Any]:
     """The six pillar scores + composite for RIGHT NOW (live snapshot).
 
@@ -129,6 +130,17 @@ def compute_pillar_scores(
     the pillar is neutral+flagged and the caller's data-confidence drops, rather
     than silently substituting restated yfinance numbers. This is the guarantee
     that a recommendation's fundamentals trace to SEC filings, not Yahoo.
+
+    `asset_class` decides which pillars are even APPLICABLE. It defaults to
+    EQUITY, so every existing caller is unaffected and equity verdicts do not
+    move. For a class where a pillar's input cannot exist — a coin has no
+    income statement, an index has no analyst coverage — that pillar is marked
+    `applicable: False` and its weight is REDISTRIBUTED over the pillars that
+    were actually measured, rather than contributing `_pillar`'s neutral 50.0.
+    The difference is not cosmetic: at the equity weights an inapplicable
+    fundamentals pillar would otherwise inject `50.0 * 0.20 = 10` points of
+    fabricated middle into every crypto composite, pulling it toward HOLD by
+    construction while flagging it in a field the composite never reads.
     """
     fundamentals = fundamentals or {}
     pillars: Dict[str, Dict[str, Any]] = {}
@@ -271,10 +283,30 @@ def compute_pillar_scores(
         "mean(reddit sentiment remapped + shrunk by mentions, stocktwits ratio shrunk by volume)",
         {"subs": {k: round(v, 1) for k, v in subs_s.items()}}, flags_s)
 
+    # ── APPLICABILITY (the asset class decides what can be scored at all) ──
+    from mas.asset_class import spec_for
+    _spec = spec_for(asset_class)
+    _inapplicable = set(_spec.inapplicable_pillars)
+    for _name, _p in pillars.items():
+        _p["applicable"] = _name not in _inapplicable
+        if _name in _inapplicable:
+            _p["flags"] = list(_p["flags"]) + [
+                f"not_applicable_to_{_spec.asset_class.lower()}"]
+
+    # Redistribute the weight of inapplicable core pillars over the rest, so
+    # the composite is the weighted mean of what was MEASURED.
+    _live = {k: w for k, w in CORE_WEIGHTS.items() if k not in _inapplicable}
+    _live_total = sum(_live.values())
+    weights = ({k: w / _live_total for k, w in _live.items()}
+               if _live_total > 0 else {})
+
     # ── COMBINE (the prediction agent's seat at this table) ────────────────
-    core = sum(CORE_WEIGHTS[k] * pillars[k]["score"] for k in CORE_WEIGHTS)
+    core = (sum(weights[k] * pillars[k]["score"] for k in weights)
+            if weights else 50.0)
     modifiers = 0.0
     for name in ("social", "research"):
+        if name in _inapplicable:
+            continue
         p = pillars[name]
         modifiers += (p["score"] - 50.0) / 50.0 * MODIFIER_MAX_PTS * p["confidence"]
     risk_mult = 0.5 + 0.5 * pillars["risk"]["score"] / 100.0
@@ -293,7 +325,11 @@ def compute_pillar_scores(
         "risk_veto": veto,
         "composite": composite,
         "action": action_for(composite),
-        "weights": dict(CORE_WEIGHTS),
+        "weights": {k: round(v, 4) for k, v in weights.items()},
+        "nominal_weights": dict(CORE_WEIGHTS),
+        "asset_class": _spec.asset_class,
+        "inapplicable_pillars": sorted(_inapplicable),
+        "composite_scorable": bool(weights),
         "modifier_max_pts": MODIFIER_MAX_PTS,
     }
 
