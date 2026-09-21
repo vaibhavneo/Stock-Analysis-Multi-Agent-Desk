@@ -2410,14 +2410,39 @@ function _paintDecisionIntelligence(d) {
                   : 'No directional read to hand over, so OptionsPilot will use its own.'}</span>
     </div>
     <div id="optionsBody"></div>
+
+    <!-- The other half of the loop. OptionsPilot weights this desk at 45% of
+         its composite and reads it over HTTP; if the desk has not frozen a
+         view for a name, that name can never clear OptionsPilot's bar. This
+         direction needs no credential. -->
+    <div style="margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--accent)">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
+        What OptionsPilot can see of this desk</div>
+      <div id="deskCoverageBody" style="font-size:11.5px;color:var(--text);line-height:1.55">
+        <span style="color:var(--muted)">Not checked yet.</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button id="deskCoverageBtn" onclick="checkDeskCoverage('${esc(d.ticker)}')"
+          style="background:var(--bg2);border:1px solid var(--border);color:var(--accent);padding:5px 11px;border-radius:6px;font-size:11px;cursor:pointer">
+          Check what OptionsPilot sees</button>
+        <button id="deskPublishBtn" onclick="publishDeskView('${esc(d.ticker)}')"
+          style="background:var(--bg2);border:1px solid var(--accent);color:var(--accent);padding:5px 11px;border-radius:6px;font-size:11px;cursor:pointer">
+          Publish this view to the desk ledger</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.5">
+        Publishing freezes this engine's current view through the same path the calibration
+        ledger grades, so what OptionsPilot reads is measured later rather than merely shown.
+        Repeating it on the same day changes nothing.</div>
+    </div>
+
     <details style="margin-top:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3)">
       <summary style="cursor:pointer;padding:8px 11px;font-size:11px;color:var(--muted);list-style:none">
         <span style="color:var(--accent);margin-right:5px">▸</span>Trigger an OptionsPilot pipeline run</summary>
       <div style="padding:2px 11px 11px">
         <div style="font-size:11px;color:var(--text);line-height:1.55;margin-bottom:7px">
-          This is the only control here that changes anything. It runs OptionsPilot's ranking
-          across its universe and freezes qualifying ideas into that service's own journal.
-          Reading structures above needs no run and changes nothing.</div>
+          This is the only control here that changes anything on the other service. It runs
+          OptionsPilot's ranking across its universe and freezes qualifying ideas into that
+          service's own journal. Reading structures above needs no run and changes nothing.
+          Publish the desk view first if you want this run to see it.</div>
         <button id="optionsRunBtn" onclick="runOptionsPipeline()"
           style="background:var(--bg3);border:1px solid var(--yellow);color:var(--yellow);padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer">
           Run the OptionsPilot pipeline</button>
@@ -2896,6 +2921,59 @@ async function loadOptions(ticker, view) {
     box.innerHTML = `<div style="color:var(--red);font-size:12px">Could not reach the options link: ${esc(e)}</div>`;
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Reload'; }
+}
+
+async function checkDeskCoverage(ticker) {
+  const box = document.getElementById('deskCoverageBody');
+  const btn = document.getElementById('deskCoverageBtn');
+  if (!box) return;
+  btn.disabled = true;
+  box.innerHTML = '<span style="color:var(--accent)">Checking…</span>';
+  try {
+    const r = await fetch(API_BASE + '/api/desk/coverage?symbols=' + encodeURIComponent(ticker));
+    const c = await r.json();
+    const d = (c.detail || {})[ticker] || {};
+    const ok = d.state === 'directional';
+    box.innerHTML = `<div style="color:${ok ? 'var(--green)' : 'var(--yellow)'}">
+        ${esc(ticker)}: <b>${esc(d.state || 'unknown')}</b>
+        ${d.action ? ` — last published view was <b>${esc(d.action)}</b>` : ''}${
+          d.age_days != null ? `, ${esc(d.age_days)} day(s) old` : ''}.</div>
+      <div style="color:var(--muted);margin-top:3px">${esc(c.means || '')}</div>
+      ${ok ? '' : `<div style="color:var(--muted);margin-top:3px">Until this reads
+        <b>directional</b>, OptionsPilot's own pipeline scores this name zero on the desk
+        component — 45% of its composite — so it can never clear its bar.</div>`}`;
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--red)">${esc(e)}</span>`;
+  }
+  btn.disabled = false;
+}
+
+async function publishDeskView(ticker) {
+  const box = document.getElementById('deskCoverageBody');
+  const btn = document.getElementById('deskPublishBtn');
+  if (!box) return;
+  btn.disabled = true; btn.textContent = 'Publishing…';
+  box.innerHTML = '<span style="color:var(--accent)">Forming and freezing a view…</span>';
+  try {
+    const r = await fetch(API_BASE + '/api/desk/refresh', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbols: [ticker], limit: 1})
+    });
+    const res = await r.json();
+    if (res.error) {
+      box.innerHTML = `<span style="color:var(--red)">${esc(res.error)}</span>`;
+    } else {
+      const row = (res.results || [])[0];
+      const already = res.attempted === 0;
+      box.innerHTML = `<div style="color:var(--green)">
+        ${already ? esc(ticker) + ' already had a fresh view today — nothing to do.'
+                  : esc(ticker) + ': ' + esc((row && row.status) || 'done') + '.'}</div>
+        <div style="color:var(--muted);margin-top:3px">${esc((res.coverage_after || {}).means || '')}</div>`;
+    }
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--red)">${esc(e)}</span>`;
+  }
+  btn.disabled = false; btn.textContent = 'Publish this view to the desk ledger';
 }
 
 async function runOptionsPipeline() {

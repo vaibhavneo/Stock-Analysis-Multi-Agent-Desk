@@ -1196,6 +1196,61 @@ def decision_forward_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+# ── The desk half of the loop ─────────────────────────────────────────────
+#
+# OptionsPilot reads this service for direction and weights it at 45% of its
+# composite. Measured 2026-09-21, the DEPLOYED desk carried a view for 2 of its
+# 31 names while this developer's laptop carried 23 — because the only things
+# that freeze a view are a hand-run analysis and the heartbeat LaunchAgent,
+# which runs locally. So the deployed desk says almost nothing and the consumer
+# records "0 ideas from 31 decisions", which reads as a quiet market.
+#
+# These routes let the deployed desk form a view on demand. They need no
+# credential in either direction — this is the half of the link that works
+# without one.
+
+@app.route("/api/desk/coverage")
+def desk_coverage_endpoint():
+    """How much of a named universe this desk can actually speak to.
+
+    Uses OptionsPilot's own vocabulary and staleness bar so the two services
+    agree on what "covered" means rather than each computing its own answer.
+    """
+    from decision import desk_feed
+    raw = request.args.get("symbols") or ""
+    symbols = [s for s in (x.strip() for x in raw.split(",")) if s]
+    if not symbols:
+        return jsonify({"error": "pass ?symbols=AAPL,MSFT,..."}), 400
+    try:
+        return jsonify(desk_feed.coverage(symbols))
+    except Exception as e:
+        return jsonify({"error": f"coverage failed ({type(e).__name__})"}), 500
+
+
+@app.route("/api/desk/refresh", methods=["POST"])
+def desk_refresh_endpoint():
+    """Form and freeze a directional view for symbols that lack a fresh one.
+
+    Bounded per call because each symbol builds a full recommendation; the
+    caller loops. Idempotent per (ticker, day), so repeating is free rather
+    than double-counting an observation into the calibration ledger.
+    """
+    from decision import desk_feed
+    data = request.json or {}
+    symbols = data.get("symbols") or []
+    if not isinstance(symbols, list) or not symbols:
+        return jsonify({"error": "symbols must be a non-empty list"}), 400
+    try:
+        limit = int(data.get("limit", 8))
+    except (TypeError, ValueError):
+        limit = 8
+    try:
+        return jsonify(desk_feed.refresh(symbols, limit=max(1, min(limit, 40)),
+                                         force=bool(data.get("force"))))
+    except Exception as e:
+        return jsonify({"error": f"refresh failed ({type(e).__name__})"}), 500
+
+
 # ── OptionsPilot link ─────────────────────────────────────────────────────
 #
 # OptionsPilot is a separate deployed service. These routes call it; they never
