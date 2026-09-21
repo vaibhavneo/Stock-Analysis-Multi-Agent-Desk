@@ -311,6 +311,50 @@ def test_crypto_scale_inputs_price_without_blowing_up():
     check("POP is sane", 0.0 < e["probability_of_profit_risk_neutral"] < 0.5)
 
 
+# ── Strike grid ───────────────────────────────────────────────────────────
+
+def test_strike_grid_is_sized_to_the_expected_move_not_the_price():
+    """The bug this catches is silent and class-specific. EUR/USD near 1.15
+    with 3.8% vol has a 45-day one-sigma move of 0.015; a grid derived from
+    price magnitude alone quotes 0.025 increments, so the one- and two-sigma
+    strikes ROUND TO THE SAME LEVEL, every range structure has zero width,
+    and it is dropped without comment. Low-volatility underlyings simply
+    returned fewer structures than they should have."""
+    from mas.agents.derivatives import _strike_step
+    cases = [(1.148, 0.0383), (81_500, 0.37), (180.0, 0.46),
+             (7650.0, 0.09), (2650.0, 0.55), (0.0345, 0.90)]
+    T = 45 / 365
+    for spot, vol in cases:
+        sd = spot * vol * math.sqrt(T)
+        step = _strike_step(spot, sd)
+        check(f"spot={spot:g}: one sigma spans >=2 steps", sd / step >= 2.0,
+              f"sd={sd:.6g} step={step:.6g} ratio={sd/step:.2f}")
+        check(f"spot={spot:g}: but the grid is not absurdly fine",
+              sd / step <= 8.0, f"ratio={sd/step:.2f}")
+
+
+def test_strike_grid_snaps_to_increments_a_chain_would_quote():
+    from mas.agents.derivatives import _strike_step
+    for spot, sd in ((81_500, 10_588), (180.0, 29.07), (1.148, 0.0154)):
+        step = _strike_step(spot, sd)
+        mantissa = step / (10 ** math.floor(math.log10(step)))
+        check(f"step {step:g} is a round increment",
+              any(abs(mantissa - n) < 1e-9 for n in (1.0, 2.0, 2.5, 5.0)),
+              f"mantissa={mantissa}")
+
+
+def test_low_volatility_underlyings_still_get_a_full_structure_set():
+    """The observable symptom: distinct sigma levels, so nothing collapses."""
+    from mas.agents.derivatives import _strike_step, _round_strike
+    spot, vol = 1.148, 0.0383
+    T = 45 / 365
+    sd = spot * vol * math.sqrt(T)
+    step = _strike_step(spot, sd)
+    levels = [_round_strike(spot + k * sd, step) for k in (-2, -1, 0, 1, 2)]
+    check("all five sigma levels are distinct", len(set(levels)) == 5, levels)
+    check("and they are ordered", levels == sorted(levels), levels)
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

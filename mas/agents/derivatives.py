@@ -42,20 +42,44 @@ MIN_BARS = 40          # below this a realized-vol estimate is noise
 DEFAULT_DAYS = 45
 
 
-def _strike_step(price: float) -> float:
-    """A sane strike increment for this price magnitude.
+# A strike grid is useful only if one standard deviation spans several steps.
+# Below this, the +/-1 and +/-2 sigma strikes round to the same level and the
+# structure collapses to zero width.
+_STEPS_PER_SIGMA = 3.0
 
-    Listed chains do not quote continuous strikes, and proposing a $81,437.22
-    strike on BTC would be proposing something that does not exist anywhere.
+# The increments real chains actually quote, per decade.
+_NICE = (1.0, 2.0, 2.5, 5.0)
+
+
+def _strike_step(price: float, expected_move: Optional[float] = None) -> float:
+    """A strike increment sized to the EXPECTED MOVE, not just the price.
+
+    Listed chains do not quote continuous strikes, so proposing an $81,437.22
+    strike on BTC would be proposing something that exists nowhere. But
+    sizing the grid off price magnitude alone breaks on low-volatility
+    underlyings: EUR/USD near 1.15 with 3.8% annualized vol has a 45-day
+    one-sigma move of 0.015, while a magnitude-derived grid quotes 0.025
+    increments — so the one-sigma and two-sigma strikes ROUND TO THE SAME
+    LEVEL, the structure has zero width, and it is silently dropped. That is
+    why EUR/USD returned one structure where it should return two.
+
+    The grid is therefore roughly `expected_move / 3`, snapped to an
+    increment a chain would actually list (1, 2, 2.5 or 5 per decade).
     """
     if price <= 0:
         return 1.0
-    mag = 10 ** math.floor(math.log10(price))
-    for frac in (0.025, 0.05, 0.1):
-        step = mag * frac
-        if price / step <= 60:
-            return step
-    return mag * 0.25
+    if not expected_move or expected_move <= 0:
+        expected_move = price * 0.05
+
+    target = expected_move / _STEPS_PER_SIGMA
+    decade = 10 ** math.floor(math.log10(target))
+    step = min((n * decade for n in _NICE),
+               key=lambda c: abs(math.log(c / target)))
+
+    # Never finer than a thousandth of the price: a grid with more precision
+    # than the underlying is quoted to is noise dressed as detail.
+    floor = 10 ** math.floor(math.log10(price * 0.001))
+    return max(step, floor)
 
 
 def _round_strike(x: float, step: float) -> float:
@@ -176,7 +200,7 @@ def _structures(request: AgentRequest) -> AgentResult:
                  or (100.0 if spec.options == "LISTED" else 1.0))
 
     rate = risk_free_rate()
-    step = _strike_step(S)
+    step = _strike_step(S, expected_move=S * sigma * math.sqrt(T))
 
     priced: List[Dict[str, Any]] = []
     rejected: List[Dict[str, str]] = []
