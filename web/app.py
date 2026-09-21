@@ -1196,6 +1196,90 @@ def decision_forward_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+# ── OptionsPilot link ─────────────────────────────────────────────────────
+#
+# OptionsPilot is a separate deployed service. These routes call it; they never
+# import it. Everything is lazy and user-triggered: the instruments call prices
+# a live chain and was measured at ~13s, so it must never sit on the default
+# decision build.
+#
+# Neither service has a broker order path, and this link does not add one.
+
+_OPTIONS_CACHE: dict = {}
+_OPTIONS_CACHE_TTL_SEC = 180
+
+
+@app.route("/api/options/status")
+def options_status_endpoint():
+    """Is the link usable, and if not, exactly why."""
+    try:
+        from optionspilot import client
+        return jsonify(client.status())
+    except Exception as e:
+        return jsonify({"available": False,
+                        "reason": f"the options link could not be used ({type(e).__name__})"}), 200
+
+
+@app.route("/api/options/<ticker>")
+def options_endpoint(ticker: str):
+    """Candidate option structures for one symbol.
+
+    `view` is THIS engine's directional read, handed over explicitly. The UI
+    already holds a decision when it calls this, so it passes the direction it
+    computed rather than making OptionsPilot fall back to a stored desk view —
+    which its own status endpoint reports is missing for most names.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return jsonify({"status": "UNAVAILABLE", "reason": "No ticker"}), 400
+
+    view = (request.args.get("view") or "").upper().strip() or None
+    if view not in (None, "BULLISH", "BEARISH"):
+        view = None
+
+    import time as _time
+    key = (ticker, view)
+    cached = _OPTIONS_CACHE.get(key)
+    if cached and (_time.time() - cached[0]) < _OPTIONS_CACHE_TTL_SEC:
+        out = dict(cached[1])
+        out["_cached"] = True
+        return jsonify(out)
+
+    try:
+        from decision.options_overlay import build_options_overlay
+        from optionspilot import client
+        raw = client.instruments(ticker, view=view)
+        overlay = build_options_overlay(raw, requested_view=view)
+        if overlay.get("status") == "OK":
+            _OPTIONS_CACHE[key] = (_time.time(), overlay)
+        return jsonify(overlay)
+    except Exception as e:
+        return jsonify({"status": "UNAVAILABLE",
+                        "reason": f"the options link failed ({type(e).__name__})",
+                        "candidates": [], "honesty": []}), 200
+
+
+@app.route("/api/options/run", methods=["POST"])
+def options_run_endpoint():
+    """Trigger one OptionsPilot pipeline pass.
+
+    THE ONLY WRITE THIS LINK PERFORMS, on a different service: it freezes
+    whatever ideas clear OptionsPilot's bar into ITS journal. Kept as a
+    separate, explicitly user-pressed action for that reason — the per-symbol
+    read above needs no trigger and causes no side effect.
+    """
+    data = request.json or {}
+    universe = data.get("universe")
+    if universe is not None and not isinstance(universe, list):
+        return jsonify({"available": False, "reason": "universe must be a list of symbols"}), 400
+    try:
+        from optionspilot import client
+        return jsonify(client.run_pipeline(universe=universe))
+    except Exception as e:
+        return jsonify({"available": False,
+                        "reason": f"the run could not be triggered ({type(e).__name__})"}), 200
+
+
 @app.route("/api/position-rules", methods=["POST"])
 def position_rules_endpoint():
     """Backtest the position-management rules (Phase 24). Slow and deliberately

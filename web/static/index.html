@@ -2393,6 +2393,38 @@ function _paintDecisionIntelligence(d) {
     <div style="font-size:12px;color:var(--text);line-height:1.6"><b style="color:var(--yellow)">Before you act —</b> ${esc(P.honesty || '')}</div>
   </div>`;
 
+  // ── Options, via OptionsPilot ─────────────────────────────────────────
+  // Its own collapsed section rather than part of "the working": this is an
+  // additional analysis from a separate service, not evidence behind the
+  // equity decision above.
+  const _opView = ((d.thesis || {}).direction === 'BULLISH') ? 'BULLISH'
+                : ((d.thesis || {}).direction === 'BEARISH') ? 'BEARISH' : '';
+  html += diDetails('Options — calls, puts and spreads for this view',
+    'from OptionsPilot, a separate service · loads on demand', `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px">
+      <button id="optionsLoadBtn" onclick="loadOptions('${esc(d.ticker)}', '${esc(_opView)}')"
+        style="background:var(--bg3);border:1px solid var(--accent2);color:var(--accent2);padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer">
+        Get option structures</button>
+      <span style="font-size:11px;color:var(--muted)">
+        ${_opView ? 'Hands OptionsPilot this engine\'s ' + esc(_opView.toLowerCase()) + ' read.'
+                  : 'No directional read to hand over, so OptionsPilot will use its own.'}</span>
+    </div>
+    <div id="optionsBody"></div>
+    <details style="margin-top:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3)">
+      <summary style="cursor:pointer;padding:8px 11px;font-size:11px;color:var(--muted);list-style:none">
+        <span style="color:var(--accent);margin-right:5px">▸</span>Trigger an OptionsPilot pipeline run</summary>
+      <div style="padding:2px 11px 11px">
+        <div style="font-size:11px;color:var(--text);line-height:1.55;margin-bottom:7px">
+          This is the only control here that changes anything. It runs OptionsPilot's ranking
+          across its universe and freezes qualifying ideas into that service's own journal.
+          Reading structures above needs no run and changes nothing.</div>
+        <button id="optionsRunBtn" onclick="runOptionsPipeline()"
+          style="background:var(--bg3);border:1px solid var(--yellow);color:var(--yellow);padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer">
+          Run the OptionsPilot pipeline</button>
+        <div id="optionsRunResult" style="margin-top:7px"></div>
+      </div>
+    </details>`);
+
   // ══════════════════════════════════════════════════════════════════════
   // SHOW THE WORKING — everything above, and everything the engine checked
   // to get there. Nothing here is removed; all of it is collapsed. This is
@@ -2755,6 +2787,140 @@ async function loadDiNarrative(ticker) {
   btn.disabled = false; btn.textContent = 'Regenerate';
 }
 
+
+
+// ── Options, via OptionsPilot ─────────────────────────────────────────────
+// A separate deployed service. Loaded on demand because pricing a live chain
+// was measured at ~13s, and never on the default decision build.
+//
+// The honesty block is rendered FIRST and cannot be collapsed away. OptionsPilot
+// orders these by payoff shape and explicitly disclaims that any is best; a
+// ranked list of option trades shown without that is more dangerous than no
+// list, because ranking implies a recommendation the source does not make.
+
+let _optionsCache = {};
+
+function _optionsDiagram(diag) {
+  if (!diag || !diag.available || !diag.points) return '';
+  const w = diag.width || 320, h = diag.height || 120;
+  const marks = (diag.strike_x || []).map(x =>
+    `<line x1="${x}" y1="6" x2="${x}" y2="${h - 6}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>`).join('');
+  const be = (diag.breakeven_x || []).map(x =>
+    `<line x1="${x}" y1="6" x2="${x}" y2="${h - 6}" stroke="var(--yellow)" stroke-width="1" stroke-dasharray="2,2"/>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="display:block;margin:6px 0"
+       role="img" aria-label="Payoff at expiry against the underlying price">
+    <line x1="0" y1="${diag.zero_y}" x2="${w}" y2="${diag.zero_y}" stroke="var(--muted)" stroke-width="1" opacity=".5"/>
+    ${marks}${be}
+    <line x1="${diag.spot_x}" y1="6" x2="${diag.spot_x}" y2="${h - 6}" stroke="var(--accent)" stroke-width="1"/>
+    <polyline points="${esc(diag.points)}" fill="none" stroke="var(--green)" stroke-width="2"/>
+  </svg>
+  <div style="font-size:9.5px;color:var(--muted);text-align:center">
+    payoff at expiry · <span style="color:var(--accent)">│</span> price now
+    · <span style="color:var(--yellow)">┆</span> break-even
+    · <span style="color:var(--muted)">┆</span> strikes</div>`;
+}
+
+function _optionsCandidate(c) {
+  const pop = c.probability_of_profit;
+  return `<div style="padding:11px 13px;background:var(--bg3);border-radius:8px;margin-bottom:8px;border-left:3px solid var(--accent2)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <div style="font-size:13px;font-weight:800;color:var(--text)">${esc(c.label)}</div>
+      <div style="font-size:10px;color:var(--muted)">ordered ${esc(c.rank)} by payoff shape</div>
+    </div>
+    <div style="font-size:12px;color:var(--accent);margin-top:3px;font-variant-numeric:tabular-nums">${esc(c.legs_text)}</div>
+    ${_optionsDiagram(c.diagram)}
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-top:5px">
+      ${c.breakeven_text ? `<div style="color:var(--text)">${esc(c.breakeven_text)}</div>` : ''}
+      ${pop != null ? `<div style="color:var(--muted)">Chance of profit <b style="color:var(--text)">${num(pop * 100, 0)}%</b></div>` : ''}
+      ${c.risk_reward_ratio != null ? `<div style="color:var(--muted)">Reward:risk <b style="color:var(--text)">${num(c.risk_reward_ratio, 2)}</b></div>` : ''}
+    </div>
+    ${pop != null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">That percentage is ${esc(c.probability_basis)}.</div>` : ''}
+    ${c.note ? `<div style="font-size:11px;color:var(--text);line-height:1.5;margin-top:5px">${esc(c.note)}</div>` : ''}
+    ${c.risk_reward_note ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(c.risk_reward_note)}</div>` : ''}
+  </div>`;
+}
+
+function _paintOptions(o) {
+  const box = document.getElementById('optionsBody');
+  if (!box) return;
+
+  if (o.status !== 'OK') {
+    box.innerHTML = `<div style="font-size:12px;color:var(--yellow);line-height:1.6">
+      ${esc(o.reason || 'OptionsPilot is not available.')}
+      ${o.authenticated === false ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Set <b>OPTIONSPILOT_ACCESS_CODE</b> in this service's environment to the current
+        OptionsPilot code. Nothing here can read or rotate it.</div>` : ''}
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">The equity decision above is
+        unaffected — it never depends on this link.</div></div>`;
+    return;
+  }
+
+  box.innerHTML = `
+    <div style="padding:10px 12px;background:rgba(124,58,237,.08);border:1px solid var(--accent2);border-radius:8px;margin-bottom:10px">
+      <div style="font-size:12px;color:var(--text);line-height:1.6">${esc(o.direction_source.statement)}</div>
+    </div>
+    <div style="font-size:12px;color:var(--text);margin-bottom:3px">${esc(o.headline)}</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:9px">
+      Priced ${esc(o.priced_at)} against a live chain. Ordered by: ${esc(o.criterion)}.</div>
+
+    ${(o.candidates || []).map(_optionsCandidate).join('')}
+
+    ${(o.warnings || []).length ? `<div style="margin-bottom:9px">${(o.warnings || []).map(w =>
+      `<div style="font-size:11px;color:var(--yellow)">⚠ ${esc(w)}</div>`).join('')}</div>` : ''}
+
+    <div style="padding:10px 12px;background:rgba(255,234,0,.05);border:1px solid var(--yellow);border-radius:8px">
+      <div style="font-size:10px;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">What OptionsPilot says about its own output</div>
+      ${(o.honesty || []).map(h => `<div style="font-size:11px;color:var(--text);line-height:1.55;padding:2px 0">• ${esc(h)}</div>`).join('')}
+      <div style="font-size:11px;color:var(--text);line-height:1.55;padding:4px 0 0"><b>${esc(o.no_execution)}</b></div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:7px;line-height:1.5">${esc((o.source || {}).relationship || '')}</div>`;
+}
+
+async function loadOptions(ticker, view) {
+  const box = document.getElementById('optionsBody');
+  const btn = document.getElementById('optionsLoadBtn');
+  if (!box) return;
+  const key = ticker + '::' + (view || 'none');
+  if (_optionsCache[key]) { _paintOptions(_optionsCache[key]); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Asking OptionsPilot…'; }
+  box.innerHTML = `<div style="font-size:12px;color:var(--accent);padding:8px 0">
+    ⏳ Pricing structures against a live chain — this takes a few seconds.</div>`;
+  try {
+    const q = view ? ('?view=' + encodeURIComponent(view)) : '';
+    const resp = await fetch(API_BASE + '/api/options/' + encodeURIComponent(ticker) + q);
+    const o = await resp.json();
+    if (o.status === 'OK') _optionsCache[key] = o;
+    _paintOptions(o);
+  } catch (e) {
+    box.innerHTML = `<div style="color:var(--red);font-size:12px">Could not reach the options link: ${esc(e)}</div>`;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Reload'; }
+}
+
+async function runOptionsPipeline() {
+  const box = document.getElementById('optionsRunResult');
+  const btn = document.getElementById('optionsRunBtn');
+  if (!box) return;
+  // This writes to ANOTHER service's journal, so it asks first. Every other
+  // control in this app is read-only.
+  if (!confirm('This runs OptionsPilot\'s full pipeline and freezes any ideas that clear its '
+             + 'bar into its own journal — a durable change on that service. Continue?')) return;
+  btn.disabled = true; btn.textContent = 'Running…';
+  box.innerHTML = `<div style="font-size:11px;color:var(--accent)">⏳ OptionsPilot is running its pipeline…</div>`;
+  try {
+    const resp = await fetch(API_BASE + '/api/options/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+    });
+    const r = await resp.json();
+    box.innerHTML = r.available === false
+      ? `<div style="font-size:11px;color:var(--red)">${esc(r.reason)}</div>`
+      : `<div style="font-size:11px;color:var(--green)">Run complete — ${esc(r.ideas != null ? r.ideas + ' idea(s) from ' + (r.decisions != null ? r.decisions : '?') + ' decisions' : 'see OptionsPilot for the result')}.</div>`;
+  } catch (e) {
+    box.innerHTML = `<div style="font-size:11px;color:var(--red)">${esc(e)}</div>`;
+  }
+  btn.disabled = false; btn.textContent = 'Run the OptionsPilot pipeline';
+}
 
 function formatMCap(v) {
   if (!v) return 'N/A';
