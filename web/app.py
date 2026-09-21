@@ -748,7 +748,9 @@ def _build_backtest_all(ticker: str, df):
             except Exception:
                 pass
         return {"ticker": ticker, "rows": rows,
-                "buy_hold": {"sharpe": round(bh_m["sharpe_ratio"], 3)}}
+                "buy_hold": {"sharpe": round(bh_m["sharpe_ratio"], 3),
+                             "annualized_return_pct": round(bh_m["annualized_return"] * 100, 2),
+                             "max_dd_pct": round(bh_m["max_drawdown"] * 100, 1)}}
     except Exception:
         return None
 
@@ -1031,12 +1033,21 @@ def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = F
         from data import prediction_ledger as _pl
         calibration = _pl.calibration_report(horizon=20)
     except Exception:
-        pass
+        _pl = None
+
+    # 0.58s, measured — cheap enough to always run, and it answers the one
+    # question the fine-print panel must lead with: does this strategy beat
+    # simply holding the stock?
+    backtest_all = _build_backtest_all(ticker, df)
+
+    calibration_by_horizon = None
+    try:
+        calibration_by_horizon = _pl.calibration_report_all_horizons()   # 0.24s
+    except Exception:
+        calibration_by_horizon = None
 
     xsec_ranking = None
-    backtest_all = None
     if deep:
-        backtest_all = _build_backtest_all(ticker, df)
         try:
             from xsection import ranking as _xr
             xsec_ranking = _xr.run_ranking(
@@ -1063,6 +1074,7 @@ def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = F
         calibration_interp=_interpret_calibration(calibration, None),
         backtest_interp=_interpret_backtest(rec, backtest_all),
         pillar_contradictions=detect_contradictions(rec.get("pillars"), regime=regime),
+        backtest_all=backtest_all, calibration_by_horizon=calibration_by_horizon,
         catalysts=catalysts, position=position, prior_decision=prior,
         max_portfolio_risk_pct=max_portfolio_risk_pct,
         llm_prose=rec.get("thesis"))

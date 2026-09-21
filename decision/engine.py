@@ -46,6 +46,7 @@ from decision.scenarios import build_mind_changers, build_scenarios
 from decision.state import build_decision_state
 from decision.thesis import (build_statistical_edge, build_thesis,
                              relate_thesis_and_edge)
+from decision.track_record import build_track_record
 
 REQUIRED_REC_KEYS = ("current_price", "action", "composite", "confidence")
 
@@ -72,6 +73,8 @@ def build_decision_intelligence(
     xsec_interp: Optional[Dict[str, Any]] = None,
     calibration_interp: Optional[Dict[str, Any]] = None,
     backtest_interp: Optional[Dict[str, Any]] = None,
+    backtest_all: Optional[Dict[str, Any]] = None,
+    calibration_by_horizon: Optional[Dict[Any, Any]] = None,
     pillar_contradictions: Optional[List[Dict[str, Any]]] = None,
     catalysts: Optional[Dict[str, Any]] = None,
     position: Optional[Dict[str, Any]] = None,
@@ -200,7 +203,12 @@ def build_decision_intelligence(
     # ── 12. Statistical honesty strip (Phase 17) ─────────────────────────
     honesty = _build_honesty(rec, edge, conflict, scenarios, level_map, calibration_interp)
 
-    # ── 13. Per-horizon plans — the join between horizon-tagged evidence
+    # ── 13. What this engine has actually done. Reads the strategy library
+    #        race and the per-horizon live record — both of which existed and
+    #        reached no decision surface.
+    track_record = build_track_record(rec, edge, backtest_all, calibration_by_horizon)
+
+    # ── 14. Per-horizon plans — the join between horizon-tagged evidence
     #        and timeframe-tagged levels that the engine could not previously
     #        express. Computed after sizing so every plan carries the same
     #        gate verdict: a longer holding period does not unlock size.
@@ -247,6 +255,7 @@ def build_decision_intelligence(
         "confidence": confidence,
         "quality": quality,
         "statistical_honesty": honesty,
+        "track_record": track_record,
 
         "composite": rec.get("composite"),
         "_recommendation": {k: rec.get(k) for k in
@@ -267,7 +276,7 @@ def build_decision_intelligence(
 
     decision["consistency"] = check_consistency(decision)
 
-    # ── 14. Plain English, built LAST from the finished object. It is a
+    # ── 15. Plain English, built LAST from the finished object. It is a
     #        rendering of the decision, never an input to it — which is why it
     #        cannot describe a state the object does not hold, and why it is
     #        deliberately excluded from the fingerprint below.

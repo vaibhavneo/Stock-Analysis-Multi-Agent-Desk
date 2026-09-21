@@ -2597,24 +2597,90 @@ function _paintDecisionIntelligence(d) {
       <div style="color:var(--muted)">${esc(v.explanation)} <span style="opacity:.7">[${esc(v.provenance)}]</span></div></div>`).join('')}
     <div style="font-size:10px;color:var(--muted);margin-top:5px;font-style:italic">${esc(q.note || '')}</div>`);
 
-  // ── Statistical honesty ────────────────────────────────────────────────
+  // ── What this engine has actually done ────────────────────────────────
+  // Replaces a wall of eight chips followed by five lines restating four of
+  // them. The chips are kept, nested and collapsed, because they are the audit
+  // trail — but they are no longer the answer.
+  const tr = d.track_record || {};
+  const cmp = tr.comparison || {}, live = tr.live_record || {}, smp = tr.sample || {};
   const ss = hon.sample_size || {}, dsr = hon.deflated_sharpe || {}, bts = hon.backtest_status || {}, mt = hon.multiple_testing || {};
-  html += diDetails('Backtest, calibration and the fine print', `${hon.demonstrated_edge ? 'edge demonstrated' : 'no demonstrated edge'} · ${(hon.statements || []).length} caveats`, `
-    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
-      ${diChip('Demonstrated edge', hon.demonstrated_edge ? 'YES' : 'NO', hon.demonstrated_edge ? 'var(--green)' : 'var(--red)')}
-      ${diChip('dSR', num(dsr.value) + ' / ' + num(dsr.bar, 1) + ' bar', dsr.clears_bar ? 'var(--green)' : 'var(--red)')}
-      ${diChip('Backtest sample', (ss.backtest_observations != null ? ss.backtest_observations + ' bars' : '—') + (ss.required ? ' / ' + ss.required + ' needed' : ''))}
-      ${diChip('Trades', ss.backtest_trades != null ? String(ss.backtest_trades) : '—')}
-      ${diChip('Live calibration', (hon.calibration || {}).n != null ? (hon.calibration || {}).n + ' matured' : '—', (hon.calibration || {}).status === 'OK' ? 'var(--green)' : 'var(--red)')}
-      ${diChip('Survivorship-safe', String(bts.survivorship_safe), bts.survivorship_safe ? 'var(--green)' : 'var(--red)')}
-      ${diChip('PIT fundamentals', String(bts.point_in_time_fundamentals), bts.point_in_time_fundamentals ? 'var(--green)' : 'var(--red)')}
-      ${diChip('Multiple testing', mt.corrected ? 'corrected (n=' + mt.n_trials + ')' : 'not corrected', mt.corrected ? 'var(--green)' : 'var(--red)')}
+
+  html += diDetails('What this engine has actually done', tr.headline || '', `
+    <div style="font-size:13px;color:var(--text);line-height:1.6;padding:10px 12px;background:var(--bg3);border-radius:8px;border-left:3px solid ${cmp.core_beats_hold ? 'var(--green)' : 'var(--red)'}">
+      ${esc(cmp.statement || 'No comparison against buy-and-hold was available.')}
     </div>
-    <div style="font-size:11px;color:var(--muted);line-height:1.5">${esc(dsr.meaning || '')}</div>
-    <div style="font-size:11px;color:var(--text);margin-top:5px">${esc((hon.calibration || {}).statement || '')}</div>
-    <div style="font-size:11px;color:var(--text);margin-top:3px">${esc((hon.one_sided || {}).statement || '')}</div>
-    <div style="font-size:11px;color:var(--text);margin-top:3px">${esc((hon.levels || {}).statement || '')}</div>
-    ${(hon.statements || []).map(s => `<div style="font-size:11px;color:var(--yellow);margin-top:3px">⚠ ${esc(s)}</div>`).join('')}`);
+
+    ${(cmp.rows || []).length ? `
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 4px">Every strategy tested on this stock's history</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
+      <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
+        <th style="text-align:left;padding:0 8px 4px 0">Strategy</th>
+        <th style="text-align:right;padding:0 8px 4px">Return / yr</th>
+        <th style="text-align:right;padding:0 8px 4px">Worst drop</th>
+        <th style="text-align:right;padding:0 8px 4px">Trades</th>
+        <th style="text-align:left;padding:0 0 4px">Beat holding?</th></tr></thead>
+      <tbody>
+        ${(cmp.rows || []).map(r => `<tr style="${r.is_core ? 'background:rgba(0,212,255,.07)' : ''}">
+          <td style="padding:3px 8px 3px 0;color:${r.is_core ? 'var(--accent)' : 'var(--text)'};font-weight:${r.is_core ? '700' : '400'}">
+            ${esc(String(r.strategy).replace(/_/g, ' '))}${r.is_core ? ' &nbsp;<span style="font-size:9px;color:var(--muted)">← this engine</span>' : ''}</td>
+          <td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${r.annual_return_pct >= 0 ? 'var(--green)' : 'var(--red)'}">${r.annual_return_pct >= 0 ? '+' : ''}${num(r.annual_return_pct, 1)}%</td>
+          <td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)">${num(r.max_drawdown_pct, 1)}%</td>
+          <td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${r.n_trades < 30 ? 'var(--yellow)' : 'var(--muted)'}">${esc(r.n_trades)}</td>
+          <td style="padding:3px 0;color:${r.beats_hold ? 'var(--green)' : 'var(--muted)'}">${r.beats_hold ? 'yes' : 'no'}</td></tr>`).join('')}
+        ${cmp.buy_hold_annual_return_pct != null ? `<tr style="border-top:1px solid var(--border)">
+          <td style="padding:5px 8px 3px 0;color:var(--yellow);font-weight:700">simply holding it</td>
+          <td style="padding:5px 8px 3px;text-align:right;font-variant-numeric:tabular-nums;color:var(--yellow);font-weight:700">${cmp.buy_hold_annual_return_pct >= 0 ? '+' : ''}${num(cmp.buy_hold_annual_return_pct, 1)}%</td>
+          <td style="padding:5px 8px 3px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)">${cmp.buy_hold_max_drawdown_pct != null ? num(cmp.buy_hold_max_drawdown_pct, 1) + '%' : '—'}</td>
+          <td style="padding:5px 8px 3px;text-align:right;color:var(--muted)">1</td>
+          <td style="padding:5px 0 3px;color:var(--muted)">—</td></tr>` : ''}
+      </tbody></table></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:5px;font-style:italic">${esc(cmp.caveat || '')}</div>` : ''}
+
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 4px">How big the sample really is</div>
+    <div style="font-size:12px;color:var(--text);line-height:1.55">${esc(smp.statement || '')}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5">${esc(smp.why_bars_mislead || '')}</div>
+
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 4px">This engine's own record on live calls</div>
+    <div style="font-size:12px;color:var(--text);line-height:1.55;margin-bottom:5px">${esc(live.statement || '')}</div>
+    ${(live.rows || []).length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
+      <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
+        <th style="text-align:left;padding:0 8px 4px 0">Horizon</th>
+        <th style="text-align:right;padding:0 8px 4px">Calls</th>
+        <th style="text-align:right;padding:0 8px 4px">Right on direction</th>
+        <th style="text-align:right;padding:0 0 4px">vs benchmark</th></tr></thead>
+      <tbody>${(live.rows || []).map(r => `<tr>
+        <td style="padding:3px 8px 3px 0;color:var(--text)">${esc(r.horizon_days)} days</td>
+        <td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${r.readable ? 'var(--text)' : 'var(--yellow)'}">${esc(r.n)}${r.readable ? '' : ' (thin)'}</td>
+        <td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)">${r.win_rate != null ? num(r.win_rate * 100, 0) + '%' : '—'}</td>
+        <td style="padding:3px 0;text-align:right;font-variant-numeric:tabular-nums;color:${r.avg_excess_return_pct >= 0 ? 'var(--green)' : 'var(--red)'}">${r.avg_excess_return_pct != null ? (r.avg_excess_return_pct >= 0 ? '+' : '') + num(r.avg_excess_return_pct, 2) + '%' : '—'}</td></tr>`).join('')}</tbody></table></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:5px;font-style:italic">${esc(live.caveat || '')}</div>` : ''}
+
+    <div style="margin-top:12px;padding:10px 12px;background:rgba(255,234,0,.05);border:1px solid var(--yellow);border-radius:8px">
+      <div style="font-size:11.5px;color:var(--text);line-height:1.6"><b style="color:var(--yellow)">What this cannot tell you —</b> ${esc(tr.what_this_cannot_tell_you || '')}</div>
+      <div style="font-size:11.5px;color:var(--text);line-height:1.6;margin-top:6px"><b style="color:var(--accent)">What it is good for —</b> ${esc(tr.what_this_is_good_for || '')}</div>
+    </div>
+
+    <details style="margin-top:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg3)">
+      <summary style="cursor:pointer;padding:8px 11px;font-size:11px;color:var(--muted);list-style:none">
+        <span style="color:var(--accent);margin-right:5px">▸</span>The raw gate figures</summary>
+      <div style="padding:2px 11px 11px">
+        <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
+          ${diChip('Demonstrated edge', hon.demonstrated_edge ? 'YES' : 'NO', hon.demonstrated_edge ? 'var(--green)' : 'var(--red)')}
+          ${diChip('dSR', num(dsr.value) + ' / ' + num(dsr.bar, 1) + ' bar', dsr.clears_bar ? 'var(--green)' : 'var(--red)')}
+          ${diChip('Bars tested', (ss.backtest_observations != null ? ss.backtest_observations : '—') + (ss.required ? ' / ' + ss.required + ' needed' : ''))}
+          ${diChip('Completed trades', ss.backtest_trades != null ? String(ss.backtest_trades) : '—', (ss.backtest_trades || 0) < 30 ? 'var(--yellow)' : 'var(--text)')}
+          ${diChip('Live calls matured', live.total_matured != null ? String(live.total_matured) : '0', live.total_matured ? 'var(--green)' : 'var(--red)')}
+          ${diChip('Survivorship-safe', String(bts.survivorship_safe), bts.survivorship_safe ? 'var(--green)' : 'var(--red)')}
+          ${diChip('Point-in-time fundamentals', String(bts.point_in_time_fundamentals), bts.point_in_time_fundamentals ? 'var(--green)' : 'var(--red)')}
+          ${diChip('Multiple testing', mt.corrected ? 'corrected (n=' + mt.n_trials + ')' : 'not corrected', mt.corrected ? 'var(--green)' : 'var(--red)')}
+        </div>
+        ${(tr.gates || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px">
+          ${(tr.gates || []).map(g => diChip(String(g.gate).replace(/_/g, ' '), g.passed ? 'pass' : 'fail', g.passed ? 'var(--green)' : 'var(--red)')).join('')}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);line-height:1.5">${esc(dsr.meaning || '')}</div>
+        <div style="font-size:11px;color:var(--text);margin-top:4px">${esc((hon.one_sided || {}).statement || '')}</div>
+        <div style="font-size:11px;color:var(--text);margin-top:3px">${esc((hon.levels || {}).statement || '')}</div>
+      </div>
+    </details>`);
 
   // ── Monitoring ─────────────────────────────────────────────────────────
   html += diDetails('What to check, and when', `review ${mon.review_date || '—'}, every ${mon.cadence_days || '—'} days`, `
