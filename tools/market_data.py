@@ -49,6 +49,11 @@ def fetch_fundamentals(ticker: str) -> dict[str, Any]:
     t = yf.Ticker(ticker)
     info = t.info or {}
     keys = [
+        # quoteType/fundFamily/navPrice are IDENTITY fields, not valuation
+        # ones: they are what separates an ETF from an operating company,
+        # which the symbol's own shape cannot do (SPY and AAPL look alike).
+        # Without them mas/asset_class.py can only ever return ASSUMED.
+        "quoteType", "fundFamily", "navPrice",
         "longName", "sector", "industry", "country", "currency",
         "marketCap", "enterpriseValue",
         "trailingPE", "forwardPE", "priceToBook", "priceToSalesTrailing12Months",

@@ -226,6 +226,63 @@ def test_annualization_days_are_reported_with_the_number():
     check("bands ride along", cr["vol_bands"]["asset_class"] == "CRYPTO")
 
 
+# ── ETF identification ────────────────────────────────────────────────────
+
+def test_identity_fields_are_fetched_so_etfs_can_be_identified():
+    """SPY and AAPL are indistinguishable by shape. Without quoteType in the
+    fetched field list, classify() can only ever return ASSUMED, and an ETF
+    is scored on the equity mask forever."""
+    import inspect
+    from tools import market_data
+    src = inspect.getsource(market_data.fetch_fundamentals)
+    for field in ('"quoteType"', '"fundFamily"', '"navPrice"'):
+        check(f"{field} is fetched", field in src, "missing from the key list")
+
+
+def test_fund_metadata_classifies_an_etf():
+    for meta in ({"quoteType": "ETF"},
+                 {"quoteType": "MUTUALFUND"},
+                 {"fundFamily": "SPDR"},
+                 {"navPrice": 512.3}):
+        c = classify("SPY", meta)
+        check(f"{sorted(meta)} -> ETF", c["asset_class"] == ac.ETF, c["asset_class"])
+        check("and is confident", c["confident"] is True)
+
+
+def test_an_etf_excludes_the_fundamentals_pillar():
+    """A fund has holdings, not earnings. The pillar was being fed the
+    PORTFOLIO's valuation aggregates and weighted as company quality: a gold
+    ETF scored 83 on 'fundamentals', which lifted its composite by ~9 points
+    and held it one action band higher than the price action warranted."""
+    from backtest.pillars import compute_pillar_scores
+    ind = {"current_price": 100.0}
+    sig = {"score": 40.0}
+    algo = {"composite_score": 38.0}
+    fund = {"trailingPE": 18, "priceToBook": 2.0}
+    etf = compute_pillar_scores("SPY", ind, sig, algo, fund, asset_class="ETF")
+    eq = compute_pillar_scores("SPY", ind, sig, algo, fund, asset_class="EQUITY")
+    check("fundamentals excluded for the fund",
+          "fundamentals" not in etf["weights"], etf["weights"])
+    check("weights renormalize", abs(sum(etf["weights"].values()) - 1.0) < 1e-9)
+    check("research excluded too (a fund has no analyst coverage)",
+          "research" in etf["inapplicable_pillars"], etf["inapplicable_pillars"])
+    check("the equity mask still weights it", "fundamentals" in eq["weights"])
+    check("a weak tape is no longer propped up by a fund valuation score",
+          etf["composite"] < eq["composite"],
+          f'{etf["composite"]} vs {eq["composite"]}')
+
+
+def test_core_read_resolves_an_assumed_class_before_scoring():
+    """classify() returns ASSUMED for a bare ticker. core_read must resolve
+    that with metadata BEFORE it scores, or the resolution is decorative."""
+    import inspect
+    from mas import core
+    src = inspect.getsource(core.core_read)
+    check("core_read re-classifies on an ASSUMED basis", "ASSUMED" in src)
+    check("and it happens before compute_pillar_scores",
+          src.index("ASSUMED") < src.index("compute_pillar_scores"))
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

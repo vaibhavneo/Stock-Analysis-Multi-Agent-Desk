@@ -37,22 +37,39 @@ def core_read(symbol: str, period: str = "1y",
               metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The primary agent's own read. Degrades rather than raising."""
     cls = classify(symbol, metadata)
-    asset_class = cls["asset_class"]
-    spec = spec_for(asset_class)
 
-    out: Dict[str, Any] = {
-        "symbol": cls["symbol"], "asset_class": asset_class,
-        "classification": cls, "status": "OK",
-    }
+    out: Dict[str, Any] = {"symbol": cls["symbol"], "status": "OK"}
 
     try:
         from financial_data import get_bars_df
         df = get_bars_df(cls["symbol"], period=period)
     except Exception as e:
-        out.update({"status": "NO_DATA",
+        out.update({"asset_class": cls["asset_class"], "classification": cls,
+                    "status": "NO_DATA",
                     "reason": (f"no price history for {cls['symbol']} "
                                f"({type(e).__name__})")})
         return out
+
+    # A bare alphabetic ticker cannot be separated from an ETF by shape, so
+    # the first pass returns ASSUMED. Resolve it before anything is scored:
+    # an ETF carries no income statement, and scoring one on the equity mask
+    # weights a fundamentals pillar built from PORTFOLIO aggregates as if it
+    # measured company quality. SPY was scoring 80.5 there, at 20% of its
+    # composite, for a fund that has no margins, no ROE and no filings.
+    prefetched: Dict[str, Any] = {}
+    if cls.get("basis") == "ASSUMED":
+        try:
+            from tools.market_data import fetch_fundamentals as _ff
+            prefetched = _ff(cls["symbol"]) or {}
+            if prefetched:
+                cls = classify(symbol, prefetched)
+        except Exception:
+            prefetched = {}
+
+    asset_class = cls["asset_class"]
+    spec = spec_for(asset_class)
+    out["asset_class"] = asset_class
+    out["classification"] = cls
 
     try:
         from tools.market_data import (compute_indicators, compute_algo_signals,
@@ -67,8 +84,8 @@ def core_read(symbol: str, period: str = "1y",
         # provider returns a handful of price fields dressed as fundamentals,
         # and the mask already excludes the pillar — so the call is skipped
         # rather than made and discarded.
-        fundamentals: Dict[str, Any] = {}
-        if spec.has_fundamentals or spec.has_equity_beta:
+        fundamentals: Dict[str, Any] = dict(prefetched)
+        if not fundamentals and (spec.has_fundamentals or spec.has_equity_beta):
             try:
                 fundamentals = fetch_fundamentals(cls["symbol"]) or {}
             except Exception:
