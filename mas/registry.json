@@ -1,0 +1,61 @@
+{
+  "_comment": "The sub-agent roster. Agents are DATA, not code — the same seam financial_data/registry.json draws for providers. Adding a specialist means adding an entry plus a module implementing mas/contract.py; the planner, the executor and the UI change not at all. `writes` is the field to read first: it names every side effect an agent can cause on another service, because a capability that mutates someone else's journal must never be reachable by the same automatic path as a read.",
+  "version": 1,
+  "agents": {
+    "options_pilot": {
+      "id": "options_pilot",
+      "name": "OptionsPilot",
+      "role": "Options specialist, priced from live chains",
+      "module": "mas.agents.options_pilot",
+      "transport": "http",
+      "capabilities": ["option_structures", "implied_volatility"],
+      "asset_classes": ["EQUITY", "ETF"],
+      "universe": "BOUNDED",
+      "price_basis": "TRADED_PRICE",
+      "priority": 10,
+      "reliability": 0.9,
+      "timeout_sec": 45,
+      "requires_key": "OPTIONSPILOT_ACCESS_CODE",
+      "writes": {
+        "option_structures": null,
+        "implied_volatility": null,
+        "run_pipeline": "freezes ideas into OptionsPilot's own journal on a different service; user-triggered only, never planned automatically"
+      },
+      "notes": "Strictly better than a model when it can answer: real quotes, a real IV surface, and its own forward record. It covers a bounded universe of ~31 names, so 'unavailable' here is the normal case, not a fault."
+    },
+    "derivatives": {
+      "id": "derivatives",
+      "name": "Local derivatives engine",
+      "role": "Model pricing for everything OptionsPilot does not cover",
+      "module": "mas.agents.derivatives",
+      "transport": "local",
+      "capabilities": ["option_structures", "option_pricing", "implied_volatility"],
+      "asset_classes": ["EQUITY", "ETF", "INDEX", "CRYPTO", "FX", "COMMODITY"],
+      "universe": "UNBOUNDED",
+      "price_basis": "MODEL",
+      "priority": 50,
+      "reliability": 0.55,
+      "timeout_sec": 10,
+      "requires_key": null,
+      "writes": {},
+      "notes": "Black-Scholes / CRR driven by REALIZED volatility. Priority 50 keeps it below OptionsPilot so a real chain always wins where one exists. Reliability 0.55 is not a slight on the arithmetic — it reflects that realized vol is the wrong input for an option price, and is the single largest source of error in anything this agent returns."
+    },
+    "cross_asset": {
+      "id": "cross_asset",
+      "name": "Cross-asset context",
+      "role": "How much of this move is just the benchmark?",
+      "module": "mas.agents.cross_asset",
+      "transport": "local",
+      "capabilities": ["benchmark_relation"],
+      "asset_classes": ["EQUITY", "ETF", "INDEX", "CRYPTO", "FX", "COMMODITY"],
+      "universe": "UNBOUNDED",
+      "price_basis": "PRICE_HISTORY_DERIVED",
+      "priority": 20,
+      "reliability": 0.8,
+      "timeout_sec": 30,
+      "requires_key": null,
+      "writes": {},
+      "notes": "Each class gets the benchmark it is actually driven by — an altcoin against BTC, an equity against the S&P, a currency against the dollar index. Beta to the WRONG benchmark is the specific error this replaces: yfinance reports a 'beta' for a coin computed against the equity market, which is a number with no meaning that the risk pillar would otherwise consume."
+    }
+  }
+}
