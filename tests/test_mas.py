@@ -489,6 +489,51 @@ def test_price_endpoint_returns_a_reason_rather_than_a_500_on_a_bad_structure():
           d["status"] == "ERROR" and d["reason"], d)
 
 
+def test_the_read_and_the_planner_share_one_classification():
+    """They classify independently, and can disagree. SPY was SCORED on the
+    ETF mask while the answer REPORTED equity, because core_read resolved the
+    class from fetched metadata and build_plan never saw it. An answer whose
+    stated asset class differs from the one its numbers were computed under
+    is worse than either alone."""
+    import mas.core as core_mod
+    from mas.plan import build_plan
+    fake_core = {
+        "symbol": "SPY", "asset_class": "ETF", "status": "OK", "view": None,
+        "classification": {"symbol": "SPY", "asset_class": "ETF",
+                           "basis": "METADATA", "reason": "quoteType=ETF",
+                           "confident": True, "label": "exchange-traded fund"},
+        "identity": {"quoteType": "ETF"},
+    }
+    orig = core_mod.core_read
+    core_mod.core_read = lambda *a, **k: fake_core
+    try:
+        out = core_mod.ask("SPY")
+        check("answer matches the read", out["asset_class"] == "ETF",
+              out["asset_class"])
+        check("plan matches the read", out["plan"]["asset_class"] == "ETF",
+              out["plan"]["asset_class"])
+        check("classification is carried onto the answer",
+              (out.get("classification") or {}).get("basis") == "METADATA",
+              out.get("classification"))
+    finally:
+        core_mod.core_read = orig
+
+
+def test_identity_carries_only_classifying_fields():
+    """It rides in every API response. Returning the whole provider payload
+    would put price and valuation fields in a slot named `identity`, where
+    nothing validates them and anything might read them."""
+    from mas.core import core_read
+    import inspect
+    src = inspect.getsource(core_read)
+    i = src.index('"identity"')
+    window = src[i:i + 400]
+    for f in ("quoteType", "fundFamily", "navPrice"):
+        check(f"{f} is carried", f in window)
+    for f in ("marketCap", "targetMeanPrice", "currentPrice", "profitMargins"):
+        check(f"{f} is NOT carried", f not in window)
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

@@ -70,6 +70,14 @@ def core_read(symbol: str, period: str = "1y",
     spec = spec_for(asset_class)
     out["asset_class"] = asset_class
     out["classification"] = cls
+    # The identity fields ONLY, handed back so the planner can classify the
+    # same way this did. Without it the two classify independently and can
+    # disagree: SPY was scored on the ETF mask while the answer reported
+    # EQUITY, because build_plan had no metadata and fell back to ASSUMED.
+    out["identity"] = {k: prefetched[k] for k in
+                       ("quoteType", "fundFamily", "navPrice", "sector",
+                        "trailingEps")
+                       if prefetched.get(k) is not None}
 
     try:
         from tools.market_data import (compute_indicators, compute_algo_signals,
@@ -144,11 +152,14 @@ def ask(symbol: str, period: str = "1y", capabilities=None,
     core = core_read(symbol, period=period) if include_core else None
     view = (core or {}).get("view")
 
-    plan = build_plan(symbol, capabilities=capabilities, view=view,
-                      params=params)
+    # One classification, shared. The planner must see what the read saw.
+    plan = build_plan(symbol, metadata=(core or {}).get("identity"),
+                      capabilities=capabilities, view=view, params=params)
     execution = execute(plan)
     answer = synthesize(execution, core=core)
 
+    answer["classification"] = (core or {}).get("classification") or \
+        plan.get("classification")
     answer["core"] = core
     answer["plan"] = plan
     answer["plan_description"] = describe(plan)
