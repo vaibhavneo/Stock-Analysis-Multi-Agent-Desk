@@ -158,7 +158,16 @@ def _structures(request: AgentRequest) -> AgentResult:
                            "this price history")
 
     S = float(closes[-1])
-    view = (request.params.get("view") or "NEUTRAL").upper()
+
+    # "No directional view" and "I expect it to sit still" are DIFFERENT
+    # claims, and only the second justifies selling premium. An iron condor
+    # pays when the underlying stays inside a band — that is a positive
+    # belief about range, not the absence of a belief about direction.
+    # Collapsing the two would hand a HOLD a premium-selling trade it never
+    # argued for, which is the most expensive way this layer could be wrong.
+    raw_view = request.params.get("view")
+    no_view_given = not raw_view
+    view = (raw_view or "NEUTRAL").upper()
     if view not in BY_VIEW:
         view = "NEUTRAL"
     days = int(request.params.get("days") or DEFAULT_DAYS)
@@ -196,6 +205,13 @@ def _structures(request: AgentRequest) -> AgentResult:
         f"where an option's edge lives.",
         rate["note"],
     ]
+    if no_view_given:
+        honesty.insert(0, (
+            "The desk holds NO directional view on this name, so these are "
+            "range structures — and a range structure is not the neutral "
+            "choice. It wins only if the underlying stays inside the band, "
+            "which is a positive expectation the desk has not made. Treat it "
+            "as conditional on a view you hold and this analysis does not."))
     if spec.options == "NO_ACCESSIBLE_VENUE":
         honesty.insert(0, (
             f"No venue this system can read lists options on {request.symbol}. "
@@ -204,7 +220,9 @@ def _structures(request: AgentRequest) -> AgentResult:
 
     return ok(AGENT_ID, request.capability,
               {"symbol": request.symbol, "asset_class": spec.asset_class,
-               "view": view, "spot": round(S, 8),
+               "view": "NONE_GIVEN" if no_view_given else view,
+               "structures_assume": view,
+               "spot": round(S, 8),
                "expiry_days": days,
                "volatility_annualized_pct": round(sigma * 100, 2),
                "volatility_basis": "REALIZED_30_BAR",

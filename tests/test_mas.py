@@ -398,6 +398,97 @@ def test_synthesis_works_without_a_core_read_at_all():
           any("venue" in c for c in s["class_caveats"]), s["class_caveats"])
 
 
+# ── API surface ───────────────────────────────────────────────────────────
+
+def _client():
+    from web.app import app
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+def test_agents_endpoint_lists_the_roster_and_its_side_effects():
+    r = _client().get("/api/mas/agents")
+    check("200", r.status_code == 200)
+    d = r.get_json()
+    ids = [a["id"] for a in d["agents"]]
+    check("all three agents listed", set(ids) >= {"options_pilot", "derivatives",
+                                                  "cross_asset"}, ids)
+    check("ordered by priority", ids == sorted(
+        ids, key=lambda i: {a["id"]: a["priority"] for a in d["agents"]}[i]), ids)
+    op = [a for a in d["agents"] if a["id"] == "options_pilot"][0]
+    check("the write is surfaced to the UI", "run_pipeline" in op["writes"], op)
+
+
+def test_plan_endpoint_answers_without_touching_a_specialist():
+    c = _client()
+    r = c.get("/api/mas/plan?symbol=BTC-USD")
+    check("200", r.status_code == 200)
+    d = r.get_json()
+    check("classified", d["plan"]["asset_class"] == "CRYPTO")
+    check("described in sentences", len(d["description"]) >= 2, d["description"])
+    for step in d["plan"]["steps"]:
+        for a in step["attempts"]:
+            check("no optionspilot for a coin", a["agent_id"] != "options_pilot")
+
+
+def test_plan_endpoint_rejects_an_empty_symbol():
+    r = _client().get("/api/mas/plan?symbol=")
+    check("400", r.status_code == 400, r.status_code)
+
+
+def test_ask_endpoint_requires_a_symbol():
+    r = _client().post("/api/mas/ask", json={})
+    check("400", r.status_code == 400, r.status_code)
+
+
+def test_ask_endpoint_rejects_a_malformed_capability_list():
+    r = _client().post("/api/mas/ask", json={"symbol": "AAPL",
+                                             "capabilities": "option_structures"})
+    check("400 on a string where a list is required", r.status_code == 400,
+          r.status_code)
+
+
+def test_price_endpoint_validates_before_pricing():
+    c = _client()
+    for body in ({"symbol": "BTC-USD"},
+                 {"symbol": "BTC-USD", "structure": "bull_call_spread"},
+                 {"symbol": "BTC-USD", "structure": "bull_call_spread",
+                  "strikes": "85000,95000"},
+                 {"structure": "bull_call_spread", "strikes": [1, 2]}):
+        r = c.post("/api/mas/price", json=body)
+        check(f"400 on {sorted(body)}", r.status_code == 400, r.status_code)
+    r = c.post("/api/mas/price", json={"symbol": "BTC-USD",
+                                       "structure": "bull_call_spread",
+                                       "strikes": ["x", "y"]})
+    check("400 on non-numeric strikes", r.status_code == 400, r.status_code)
+
+
+def test_price_endpoint_prices_a_named_structure_offline():
+    r = _client().post("/api/mas/price", json={
+        "symbol": "BTC-USD", "structure": "bull_call_spread",
+        "strikes": [85000, 95000], "days": 30, "sigma": 0.6, "spot": 81000,
+        "contract_multiplier": 1})
+    check("200", r.status_code == 200)
+    d = r.get_json()
+    check("priced", d["status"] == "OK", d.get("reason"))
+    e = d["data"]["evaluation"]
+    check("labelled MODEL", e["basis"] == "MODEL", e["basis"])
+    check("breakeven between the strikes",
+          85000 < e["breakevens"][0] < 95000, e["breakevens"])
+    check("the classification rides along",
+          d["classification"]["asset_class"] == "CRYPTO")
+
+
+def test_price_endpoint_returns_a_reason_rather_than_a_500_on_a_bad_structure():
+    r = _client().post("/api/mas/price", json={
+        "symbol": "BTC-USD", "structure": "iron_condr", "strikes": [1, 2, 3, 4],
+        "sigma": 0.5, "spot": 100, "days": 30})
+    check("still 200", r.status_code == 200, r.status_code)
+    d = r.get_json()
+    check("reported as an error with a reason",
+          d["status"] == "ERROR" and d["reason"], d)
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

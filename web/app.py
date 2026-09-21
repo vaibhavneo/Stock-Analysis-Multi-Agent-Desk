@@ -1335,6 +1335,142 @@ def options_run_endpoint():
                         "reason": f"the run could not be triggered ({type(e).__name__})"}), 200
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# MULTI-AGENT DESK — one entry point for any asset class
+# ══════════════════════════════════════════════════════════════════════════
+_MAS_CACHE: dict = {}
+_MAS_CACHE_TTL_SEC = 180
+
+
+@app.route("/api/mas/agents")
+def mas_agents_endpoint():
+    """The sub-agent roster. Reads the registry; touches no specialist."""
+    try:
+        from mas import registry
+        reg = registry.load()
+        return jsonify({
+            "capabilities": list(registry.CAPABILITIES),
+            "agents": [{
+                "id": a["id"], "name": a["name"], "role": a.get("role"),
+                "transport": a.get("transport"),
+                "capabilities": a.get("capabilities"),
+                "asset_classes": a.get("asset_classes"),
+                "price_basis": a.get("price_basis"),
+                "priority": a.get("priority"),
+                "universe": a.get("universe"),
+                "requires_key": a.get("requires_key"),
+                "writes": {k: v for k, v in (a.get("writes") or {}).items() if v},
+                "notes": a.get("notes"),
+            } for a in sorted(reg["agents"].values(),
+                              key=lambda x: x.get("priority", 100))],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mas/plan")
+def mas_plan_endpoint():
+    """Who WOULD be asked, and who would not, and why.
+
+    Does no I/O at all, so it answers instantly and can be shown before the
+    run starts. A user who can see that OptionsPilot is about to be skipped
+    for a coin — and the reason — is reading the routing rather than guessing
+    at it from a missing panel.
+    """
+    symbol = (request.args.get("symbol") or "").strip()
+    if not symbol:
+        return jsonify({"error": "No symbol"}), 400
+    view = (request.args.get("view") or "").upper().strip() or None
+    if view not in (None, "BULLISH", "BEARISH", "NEUTRAL", "VOLATILE"):
+        view = None
+    try:
+        from mas.plan import build_plan, describe
+        plan = build_plan(symbol, view=view)
+        return jsonify({"plan": plan, "description": describe(plan)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mas/ask", methods=["POST"])
+def mas_ask_endpoint():
+    """The multi-agent answer for ONE symbol of ANY asset class.
+
+    Reads only. The one capability that would mutate another service —
+    OptionsPilot's pipeline trigger — is excluded from planning by the
+    registry and stays behind the explicit /api/options/run button.
+    """
+    data = request.json or {}
+    symbol = (data.get("symbol") or data.get("ticker") or "").strip()
+    if not symbol:
+        return jsonify({"error": "No symbol"}), 400
+
+    period = data.get("period") or "1y"
+    caps = data.get("capabilities")
+    if caps is not None and not isinstance(caps, list):
+        return jsonify({"error": "capabilities must be a list"}), 400
+
+    params = {}
+    for key, cast in (("days", int), ("expiry_days", int)):
+        if data.get(key) is not None:
+            try:
+                params["days"] = max(1, min(730, cast(data[key])))
+            except (TypeError, ValueError):
+                pass
+
+    key = (symbol.upper(), period, tuple(caps or ()), params.get("days"))
+    import time as _time
+    cached = _MAS_CACHE.get(key)
+    if cached and (_time.time() - cached[0]) < _MAS_CACHE_TTL_SEC:
+        out = dict(cached[1])
+        out["_cached"] = True
+        return jsonify(out)
+
+    try:
+        from mas.core import ask
+        answer = ask(symbol, period=period, capabilities=caps,
+                     params=params or None)
+        _MAS_CACHE[key] = (_time.time(), answer)
+        return jsonify(answer)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mas/price", methods=["POST"])
+def mas_price_endpoint():
+    """Price ONE structure the caller specifies, on any underlying.
+
+    Separate from /api/mas/ask because the question is different: ask() picks
+    structures for a view, this prices a structure someone already has in
+    mind. Model-priced and labelled as such.
+    """
+    data = request.json or {}
+    symbol = (data.get("symbol") or "").strip()
+    structure = (data.get("structure") or "").strip()
+    strikes = data.get("strikes")
+    if not symbol or not structure or not isinstance(strikes, list) or not strikes:
+        return jsonify({"error": "symbol, structure and strikes are required"}), 400
+    try:
+        strikes = [float(x) for x in strikes]
+    except (TypeError, ValueError):
+        return jsonify({"error": "strikes must be numbers"}), 400
+
+    try:
+        from mas.asset_class import classify
+        from mas.contract import AgentRequest
+        from mas.agents import derivatives
+        cls = classify(symbol)
+        params = {"structure": structure, "strikes": strikes}
+        for k in ("days", "sigma", "spot", "contract_multiplier"):
+            if data.get(k) is not None:
+                params[k] = float(data[k])
+        res = derivatives.run(AgentRequest(
+            symbol=cls["symbol"], asset_class=cls["asset_class"],
+            capability="option_pricing", params=params))
+        return jsonify({**res.to_dict(), "classification": cls})
+    except Exception as e:
+        return jsonify({"status": "ERROR", "reason": f"{type(e).__name__}: {e}"}), 200
+
+
 @app.route("/api/position-rules", methods=["POST"])
 def position_rules_endpoint():
     """Backtest the position-management rules (Phase 24). Slow and deliberately

@@ -300,6 +300,9 @@
     <button class="btn-analyze" id="quickRecTopBtn" onclick="quickRecStandalone()"
       style="background:var(--bg3);color:var(--accent);border:1px solid var(--border)"
       title="Keyless 7-pillar computed recommendation — no LLM, no API key needed">🏛️ Quick Rec</button>
+    <button class="btn-analyze" id="masToggleBtn" onclick="toggleMasCard()"
+      style="background:var(--bg3);color:var(--yellow);border:1px solid var(--border)"
+      title="Any asset class — equities, crypto, currencies, indices, commodities. Routes to whichever specialist can answer.">🌐 Any Asset</button>
     <button class="btn-analyze" id="portfolioToggleBtn" onclick="togglePortfolioCard()"
       style="background:var(--bg3);color:var(--accent2);border:1px solid var(--border)"
       title="Track your holdings and get a signal on each">💼 My Portfolio</button>
@@ -338,6 +341,42 @@
     <button class="qbtn" onclick="quickAnalyze('SPY')">SPY</button>
     <button class="qbtn" onclick="quickAnalyze('BTC-USD')">BTC</button>
   </div>
+</div>
+
+<div class="card" id="masCard" style="display:none;margin:16px 24px;max-width:1400px;margin-left:auto;margin-right:auto">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>🌐 Multi-Asset Desk <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">— this desk orchestrates; specialists answer</span></span>
+    <button onclick="toggleMasCard()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <input type="text" id="masSymbol" placeholder="BTC-USD" maxlength="14"
+      onkeydown="if(event.key==='Enter')runMas()"
+      oninput="previewMasPlan()"
+      style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:14px;font-weight:700;width:150px;text-transform:uppercase;outline:none">
+    <button class="btn-analyze" id="masRunBtn" onclick="runMas()" style="padding:8px 18px;font-size:13px">Ask the desk</button>
+    <span style="font-size:10px;color:var(--muted)">Reads only. Nothing here places an order or writes to another service.</span>
+  </div>
+
+  <!-- Quick picks spanning the classes, so the routing differences are one
+       click away rather than something you have to know to type. -->
+  <div class="quick-picks" style="opacity:.8;margin-bottom:10px">
+    <span>Try:</span>
+    <button class="qbtn" onclick="quickMas('BTC-USD')">BTC-USD</button>
+    <button class="qbtn" onclick="quickMas('ETH-USD')">ETH-USD</button>
+    <button class="qbtn" onclick="quickMas('SOL-USD')">SOL-USD</button>
+    <button class="qbtn" onclick="quickMas('EURUSD=X')">EUR/USD</button>
+    <button class="qbtn" onclick="quickMas('GC=F')">Gold</button>
+    <button class="qbtn" onclick="quickMas('^GSPC')">S&amp;P 500</button>
+    <button class="qbtn" onclick="quickMas('NVDA')">NVDA</button>
+  </div>
+
+  <!-- The routing, shown BEFORE anything runs. /api/mas/plan does no I/O, so
+       this is instant and tells the user who is about to be asked and who is
+       not — a specialist that was never consulted and one that declined are
+       different facts about an answer. -->
+  <div id="masPlanPreview" style="margin-bottom:10px"></div>
+  <div id="masBody"></div>
 </div>
 
 <div class="card" id="portfolioCard" style="display:none;margin:16px 24px;max-width:1400px;margin-left:auto;margin-right:auto">
@@ -2899,6 +2938,228 @@ function _paintOptions(o) {
       <div style="font-size:11px;color:var(--text);line-height:1.55;padding:4px 0 0"><b>${esc(o.no_execution)}</b></div>
     </div>
     <div style="font-size:10px;color:var(--muted);margin-top:7px;line-height:1.5">${esc((o.source || {}).relationship || '')}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// MULTI-ASSET DESK — Stock Agent orchestrating, specialists answering
+// ══════════════════════════════════════════════════════════════════════════
+let _masPlanTimer = null;
+
+function toggleMasCard() {
+  const c = document.getElementById('masCard');
+  const open = c.style.display === 'none';
+  c.style.display = open ? 'block' : 'none';
+  if (open) {
+    const inp = document.getElementById('masSymbol');
+    if (!inp.value) inp.value = (document.getElementById('ticker').value || '').toUpperCase();
+    inp.focus();
+    previewMasPlan();
+  }
+}
+
+function quickMas(sym) {
+  document.getElementById('masSymbol').value = sym;
+  runMas();
+}
+
+// The plan endpoint does no I/O, so previewing it as the user types costs
+// nothing and shows the routing decision before any specialist is called.
+function previewMasPlan() {
+  clearTimeout(_masPlanTimer);
+  _masPlanTimer = setTimeout(async () => {
+    const sym = (document.getElementById('masSymbol').value || '').trim();
+    const el = document.getElementById('masPlanPreview');
+    if (!sym) { el.innerHTML = ''; return; }
+    try {
+      const r = await fetch('/api/mas/plan?symbol=' + encodeURIComponent(sym));
+      const d = await r.json();
+      if (d.error) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div style="padding:9px 11px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--yellow)">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Routing — before anything runs</div>
+        ${(d.description || []).map(l => `<div style="font-size:11.5px;color:var(--text);line-height:1.6">${esc(l)}</div>`).join('')}
+      </div>`;
+    } catch (e) { el.innerHTML = ''; }
+  }, 250);
+}
+
+function _masMoney(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits: 2});
+}
+
+function _masLegs(legs) {
+  return (legs || []).map(l =>
+    `${l.qty > 0 ? '+' : ''}${l.qty} ${l.kind} ${Number(l.strike).toLocaleString()}`).join(' / ');
+}
+
+function _masStructureTable(o) {
+  if (!o || !(o.structures || []).length) return '';
+  const rows = o.structures.map(r => `
+    <tr style="border-top:1px solid var(--border)">
+      <td style="padding:7px 8px;font-size:12px;color:var(--text);font-weight:600">${esc((r.name || '').replace(/_/g, ' '))}
+        <div style="font-size:10.5px;color:var(--muted);font-weight:400;margin-top:2px">${esc(_masLegs(r.legs))}</div></td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right;color:${r.cash_direction === 'CREDIT' ? 'var(--green)' : 'var(--text)'}">
+        ${_masMoney(r.cost)}<div style="font-size:10px;color:var(--muted)">${esc(r.cash_direction || '')}</div></td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right;color:var(--green)">
+        ${r.max_profit_unbounded ? 'uncapped' : _masMoney(r.max_profit)}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right;color:var(--red)">${_masMoney(r.max_loss)}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right;color:var(--text)">
+        ${(r.breakevens || []).map(b => Number(b).toLocaleString(undefined, {maximumFractionDigits: 2})).join(', ') || '—'}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:right;color:var(--accent)">
+        ${r.probability_of_profit_risk_neutral !== null && r.probability_of_profit_risk_neutral !== undefined
+          ? (r.probability_of_profit_risk_neutral * 100).toFixed(0) + '%' : '—'}</td>
+    </tr>`).join('');
+  return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:620px">
+    <tr>
+      <th style="padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:left">Structure</th>
+      <th style="padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:right">Cost</th>
+      <th style="padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:right">Max gain</th>
+      <th style="padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:right">Max loss</th>
+      <th style="padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:right">Breakeven</th>
+      <th style="padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;text-align:right" title="Risk-neutral probability under the pricing model — not a forecast">Odds*</th>
+    </tr>${rows}</table></div>`;
+}
+
+async function runMas() {
+  const sym = (document.getElementById('masSymbol').value || '').trim();
+  const body = document.getElementById('masBody');
+  const btn = document.getElementById('masRunBtn');
+  if (!sym) { body.innerHTML = '<div style="color:var(--muted);font-size:12px">Enter a symbol.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Asking…';
+  body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:10px 0">Classifying, planning, and asking whichever specialists can answer…</div>';
+  try {
+    const r = await fetch('/api/mas/ask', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol: sym})
+    });
+    const d = await r.json();
+    if (d.error) {
+      body.innerHTML = `<div style="color:var(--red);font-size:12px">${esc(d.error)}</div>`;
+      return;
+    }
+    renderMas(d);
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);font-size:12px">Request failed: ${esc(String(e))}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Ask the desk';
+  }
+}
+
+function renderMas(d) {
+  const core = d.core || {};
+  const cls = d.classification || (core.classification || {});
+  const sec = d.sections || {};
+  let h = '';
+
+  // ── What it is, and what the desk itself thinks ──────────────────────
+  const actColor = ({BUY: 'var(--green)', ACCUMULATE: 'var(--green)',
+                     REDUCE: 'var(--red)', SELL: 'var(--red)'})[core.action] || 'var(--yellow)';
+  h += `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;margin-bottom:12px">
+    <div style="flex:1;min-width:190px;padding:11px 13px;background:var(--bg3);border-radius:8px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Asset class</div>
+      <div style="font-size:17px;font-weight:700;color:var(--text);margin-top:3px">${esc(d.asset_label || d.asset_class || '—')}</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.5">${esc(cls.reason || '')}</div>
+    </div>
+    <div style="flex:1;min-width:190px;padding:11px 13px;background:var(--bg3);border-radius:8px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">This desk's own read</div>
+      <div style="font-size:17px;font-weight:700;color:${actColor};margin-top:3px">${esc(core.action || '—')}</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:4px">composite ${core.composite ?? '—'}${
+        core.view ? ' · hands specialists a ' + esc(core.view.toLowerCase()) + ' view' : ' · no directional view to hand over'}</div>
+    </div>
+    <div style="flex:1;min-width:190px;padding:11px 13px;background:var(--bg3);border-radius:8px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Volatility</div>
+      <div style="font-size:17px;font-weight:700;color:var(--text);margin-top:3px">${
+        (core.volatility || {}).historical_volatility_20d ?? '—'}%</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:4px">${esc((core.volatility || {}).regime || '—')} for this class
+        · annualized on ${(core.volatility || {}).annualization_days ?? '—'} days</div>
+    </div>
+  </div>`;
+
+  // ── What changed BECAUSE a specialist spoke ─────────────────────────
+  if ((d.tensions || []).length || (d.refinements || []).length) {
+    h += `<div style="margin-bottom:12px;padding:11px 13px;background:rgba(0,212,255,.06);border:1px solid var(--accent);border-radius:8px">
+      <div style="font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">What the specialists changed</div>
+      ${(d.tensions || []).map(t => `<div style="font-size:12px;color:var(--text);line-height:1.6;margin-bottom:5px">⚠ ${esc(t.tension)}</div>`).join('')}
+      ${(d.refinements || []).map(x => `<div style="font-size:12px;color:var(--text);line-height:1.6;margin-bottom:5px">→ ${esc(x)}</div>`).join('')}
+    </div>`;
+  }
+
+  // ── Options ─────────────────────────────────────────────────────────
+  const o = sec.options;
+  if (o && (o.structures || []).length) {
+    const basisChip = o.is_model_priced
+      ? `<span style="font-size:10px;color:var(--yellow);border:1px solid var(--yellow);padding:2px 7px;border-radius:10px">MODEL-PRICED</span>`
+      : `<span style="font-size:10px;color:var(--green);border:1px solid var(--green);padding:2px 7px;border-radius:10px">LIVE QUOTES</span>`;
+    h += `<div style="margin-bottom:12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:7px">
+        <span style="font-size:12px;color:var(--text);font-weight:700">Calls, puts and spreads</span>
+        ${basisChip}
+        <span style="font-size:10.5px;color:var(--muted)">via ${esc(o.answered_by || '—')}${
+          o.fell_back ? ' (fallback — the chain specialist could not answer)' : ''}</span>
+      </div>
+      ${_masStructureTable(o)}
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">*Risk-neutral probability under the pricing model — the measure the model prices in, not a forecast.</div>
+    </div>`;
+  } else if (o) {
+    h += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--bg3);border-radius:8px">
+      <div style="font-size:12px;color:var(--muted)">No option structures: ${esc(o.reason || 'no specialist answered')}</div></div>`;
+  }
+
+  // ── Everything else, collapsed ───────────────────────────────────────
+  const b = sec.benchmark;
+  if (b) {
+    h += diDetails('What is this actually tracking?',
+      `${esc(b.benchmark_label || b.benchmark)} · ${b.overlapping_returns} shared trading days`, `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        ${[['Beta', b.beta], ['Correlation', b.correlation], ['R²', b.r_squared],
+           ['Its own story', b.idiosyncratic_share === null || b.idiosyncratic_share === undefined
+             ? null : (b.idiosyncratic_share * 100).toFixed(0) + '%']]
+          .map(([k, v]) => `<div style="flex:1;min-width:110px;padding:8px 10px;background:var(--bg3);border-radius:7px">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${k}</div>
+            <div style="font-size:15px;font-weight:700;color:var(--text);margin-top:2px">${v ?? '—'}</div></div>`).join('')}
+      </div>
+      <div style="font-size:12px;color:var(--text);line-height:1.6">${esc(b.verdict || '')}</div>
+      ${(b.honesty || []).map(x => `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:5px">${esc(x)}</div>`).join('')}`);
+  }
+
+  if (o && (o.honesty || []).length) {
+    h += diDetails('What these option numbers are, and are not',
+      `${o.is_model_priced ? 'model-priced' : 'from live quotes'} · read before acting`,
+      (o.honesty || []).map(x => `<div style="font-size:12px;color:var(--text);line-height:1.6;padding:3px 0">• ${esc(x)}</div>`).join(''));
+  }
+
+  if ((core.inapplicable_pillars || []).length || core.scoring_note) {
+    h += diDetails('How this class is scored differently',
+      `${(core.inapplicable_pillars || []).length} pillar(s) excluded, weights renormalized`, `
+      <div style="font-size:12px;color:var(--text);line-height:1.6;margin-bottom:7px">${esc(core.scoring_note || '')}</div>
+      <div style="font-size:11.5px;color:var(--muted)">Weights actually used: ${
+        Object.entries(core.weights || {}).map(([k, v]) => `${esc(k)} ${(v * 100).toFixed(0)}%`).join(' · ') || '—'}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Equity defaults would have been: ${
+        Object.entries(core.nominal_weights || {}).map(([k, v]) => `${esc(k)} ${(v * 100).toFixed(0)}%`).join(' · ') || '—'}</div>`);
+  }
+
+  if ((d.class_caveats || []).length) {
+    h += diDetails('Standing caveats for this asset class', 'true of the class, not of this symbol',
+      (d.class_caveats || []).map(x => `<div style="font-size:12px;color:var(--text);line-height:1.6;padding:3px 0">• ${esc(x)}</div>`).join(''));
+  }
+
+  // The trace. Every attempt, including the declines and the never-askeds.
+  h += diDetails('Who was asked, who declined, and why',
+    `${(d.answered || []).length} answered · ${(d.unanswered || []).length} did not · ${d.elapsed_ms}ms`,
+    (d.trace || []).map(t => `
+      <div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-radius:7px">
+        <div style="font-size:11.5px;color:var(--text);font-weight:600">${esc((t.capability || '').replace(/_/g, ' '))}
+          <span style="font-weight:400;color:var(--muted)">${t.answered_by ? '— answered by ' + esc(t.answered_by) : '— unanswered'}${
+            t.fell_back ? ' (fallback)' : ''}</span></div>
+        ${(t.attempts || []).map(a => `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:3px">
+          <span style="color:${a.status === 'OK' ? 'var(--green)' : a.status === 'ERROR' ? 'var(--red)' : 'var(--muted)'}">${esc(a.status)}</span>
+          · ${esc(a.agent_id || '—')}${a.elapsed_ms !== null && a.elapsed_ms !== undefined ? ' · ' + a.elapsed_ms + 'ms' : ''}
+          ${a.reason ? '<br><span style="padding-left:10px">' + esc(a.reason) + '</span>' : ''}</div>`).join('')}
+        ${!t.answered_by && t.reason ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${esc(t.reason)}</div>` : ''}
+      </div>`).join(''));
+
+  document.getElementById('masBody').innerHTML = h;
 }
 
 async function loadOptions(ticker, view) {
