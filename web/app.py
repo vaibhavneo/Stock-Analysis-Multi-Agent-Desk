@@ -1079,6 +1079,39 @@ def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = F
         max_portfolio_risk_pct=max_portfolio_risk_pct,
         llm_prose=rec.get("thesis"))
 
+    # ── Options, folded into the ANSWER rather than fetched on demand ─────
+    # This used to be a button that called OptionsPilot directly, so when its
+    # access code was absent or rotated the user got an error where an
+    # analysis should have been — and the local pricing engine that could have
+    # answered was never asked. Routing through the roster fixes the shape of
+    # the dependency, not just the symptom: the chain specialist is tried
+    # first and preferred, and when it declines the desk answers itself.
+    #
+    # Deliberately AFTER _build: the direction is handed down from the thesis
+    # the decision already reached, so one brief cannot contain a bullish
+    # structure and a bearish verdict. Costs no extra fetch — `df` is already
+    # in hand — and is wrapped so an options failure can never take down a
+    # decision that does not depend on it.
+    try:
+        from decision.options_overlay import view_for as _view_for
+        from mas.options_brief import build as _build_options
+        _closes = [float(v) for v in df["Close"].tolist()]
+        _horizon = rec.get("time_horizon_days") or 45
+        decision["options"] = _build_options(
+            ticker,
+            view=_view_for(decision.get("thesis")),
+            closes=_closes,
+            days=max(21, min(int(_horizon), 120)),
+            metadata=fund,
+            spot=rec.get("current_price"))
+    except Exception as e:
+        decision["options"] = {
+            "status": "UNAVAILABLE",
+            "reason": f"the options layer could not be reached ({type(e).__name__})",
+            "candidates": [], "honesty": [], "trace": [],
+            "no_execution": "Nothing in this system can place an order.",
+        }
+
     # Journal every generated decision. Append-only and content-addressed, so
     # repeated views of the same page do not create duplicate rows.
     try:
@@ -1300,18 +1333,23 @@ def options_endpoint(ticker: str):
         out["_cached"] = True
         return jsonify(out)
 
+    # Routed through the ROSTER, not straight at OptionsPilot. Calling that
+    # service directly made it a hard dependency: a missing or rotated access
+    # code produced an error where an analysis belongs, while the local
+    # pricing engine that could have answered sat unasked. The roster prefers
+    # a live chain wherever one answers and falls back to the model otherwise,
+    # so this endpoint now degrades instead of failing.
     try:
-        from decision.options_overlay import build_options_overlay
-        from optionspilot import client
-        raw = client.instruments(ticker, view=view)
-        overlay = build_options_overlay(raw, requested_view=view)
-        if overlay.get("status") == "OK":
-            _OPTIONS_CACHE[key] = (_time.time(), overlay)
-        return jsonify(overlay)
+        from mas.options_brief import build as _build_options
+        section = _build_options(ticker, view=view,
+                                 days=int(request.args.get("days") or 45))
+        if section.get("status") == "OK":
+            _OPTIONS_CACHE[key] = (_time.time(), section)
+        return jsonify(section)
     except Exception as e:
         return jsonify({"status": "UNAVAILABLE",
-                        "reason": f"the options link failed ({type(e).__name__})",
-                        "candidates": [], "honesty": []}), 200
+                        "reason": f"the options layer failed ({type(e).__name__})",
+                        "candidates": [], "honesty": [], "trace": []}), 200
 
 
 @app.route("/api/options/run", methods=["POST"])

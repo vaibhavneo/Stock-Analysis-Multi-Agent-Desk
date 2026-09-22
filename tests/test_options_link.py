@@ -291,37 +291,84 @@ def _client():
 
 def test_reading_structures_never_triggers_a_run():
     """The read is side-effect free on the other service. A read that quietly
-    wrote to another system's journal would be the worst kind of surprise."""
+    wrote to another system's journal would be the worst kind of surprise.
+
+    Now routed through the agent roster, which excludes writing capabilities
+    from planning entirely — so this holds by construction rather than by the
+    endpoint remembering not to call run_pipeline."""
     app_mod, c = _client()
-    with patch.object(client, "instruments", return_value=_raw_payload()) as read, \
+    with patch.dict(os.environ, {"OPTIONSPILOT_ACCESS_CODE": "test-code"}), \
+         patch.object(client, "instruments", return_value=_raw_payload()) as read, \
          patch.object(client, "run_pipeline") as run:
         r = c.get("/api/options/TEST?view=BULLISH")
     check("200", r.status_code == 200)
-    check("the read happened", read.called)
+    check("the chain was read", read.called)
     check("no run was triggered", not run.called)
 
 
 def test_the_view_is_passed_through_and_validated():
     app_mod, c = _client()
-    with patch.object(client, "instruments", return_value=_raw_payload()) as read:
+    with patch.dict(os.environ, {"OPTIONSPILOT_ACCESS_CODE": "test-code"}), \
+         patch.object(client, "instruments", return_value=_raw_payload()) as read:
         c.get("/api/options/TEST?view=BULLISH")
-        check("a valid view is forwarded", read.call_args.kwargs.get("view") == "BULLISH")
+        check("a valid view is forwarded",
+              read.call_args.kwargs.get("view") == "BULLISH",
+              read.call_args)
         app_mod._OPTIONS_CACHE.clear()
         c.get("/api/options/TEST?view=SIDEWAYS")
         check("an unrecognised view is dropped, not forwarded",
-              read.call_args.kwargs.get("view") is None)
+              read.call_args.kwargs.get("view") is None,
+              read.call_args)
 
 
-def test_the_endpoint_degrades_to_200_with_a_reason():
-    """A failing dependency must not turn into a 500 on this service."""
+def test_a_chain_failure_falls_back_to_a_model_answer_not_an_error():
+    """This is the behaviour change that matters most.
+
+    Previously a raising chain produced status=UNAVAILABLE and the user saw an
+    error where an analysis belongs. The chain specialist is now one attempt
+    among several, so its failure downgrades the BASIS of the answer rather
+    than removing the answer. The failure itself is preserved in the trace —
+    silently substituting a weaker source would be worse than the error was.
+    """
     app_mod, c = _client()
-    with patch.object(client, "instruments",
-                      side_effect=RuntimeError("boom")):
-        r = c.get("/api/options/TEST")
+    with patch.dict(os.environ, {"OPTIONSPILOT_ACCESS_CODE": "test-code"}), \
+         patch.object(client, "instruments", side_effect=RuntimeError("boom")):
+        r = c.get("/api/options/AAPL")
     check("still 200", r.status_code == 200)
     d = r.get_json()
-    check("status is UNAVAILABLE", d["status"] == "UNAVAILABLE")
-    check("a reason is given", bool(d["reason"]))
+    check("an answer is produced anyway", d["status"] == "OK", d.get("reason"))
+    check("but on a weaker basis", d["basis"] == "MODEL", d.get("basis"))
+    check("and it is flagged as a fallback", d["fell_back"] is True)
+    check("structures are present", len(d["candidates"]) >= 1)
+    chain = [t for t in d["trace"] if t["agent_id"] == "options_pilot"]
+    check("the chain attempt is recorded", len(chain) == 1, d["trace"])
+    check("the failure text is preserved",
+          "boom" in (chain[0]["reason"] or ""), chain[0])
+    check("the reader is told a better source exists", bool(d.get("upgrade")))
+
+
+def test_no_access_code_still_returns_structures():
+    """The exact regression that started this. With no credential the endpoint
+    used to render 'OptionsPilot requires an access code and the one
+    configured here was not accepted' — an error, in the one place a user
+    looks for an options analysis. One specialist's missing credential must
+    not be able to remove a capability from the primary agent."""
+    app_mod, c = _client()
+    env = {k: v for k, v in os.environ.items() if k != "OPTIONSPILOT_ACCESS_CODE"}
+    with patch.dict(os.environ, env, clear=True):
+        r = c.get("/api/options/AAPL?view=BULLISH")
+    check("200", r.status_code == 200)
+    d = r.get_json()
+    check("structures are returned", d["status"] == "OK", d.get("reason"))
+    check("model-priced", d["is_model_priced"] is True)
+    check("every structure carries a plain-language sentence",
+          all(ct.get("plain") for ct in d["candidates"]), d["candidates"])
+    skipped = [t for t in d["trace"] if t["agent_id"] == "options_pilot"]
+    check("the chain specialist is still shown as skipped", len(skipped) == 1,
+          d["trace"])
+    check("naming the missing variable",
+          "OPTIONSPILOT_ACCESS_CODE" in (skipped[0]["reason"] or ""),
+          skipped[0])
 
 
 def test_the_run_endpoint_is_the_only_write():

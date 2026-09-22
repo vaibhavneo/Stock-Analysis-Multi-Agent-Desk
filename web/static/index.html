@@ -2427,6 +2427,13 @@ function _paintDecisionIntelligence(d) {
     ${P.watch_for ? `<div style="font-size:12px;color:var(--text);margin-top:9px;padding:9px 11px;background:var(--bg3);border-radius:8px">
       <b style="color:var(--accent)">What am I waiting for?</b> ${esc(P.watch_for)}</div>` : ''}`);
 
+  // ── Options, in the ANSWER rather than behind a button ────────────────
+  // The derivatives read is part of an end-to-end view of the stock, not an
+  // optional extra from another app. The single best-fitting structure shows
+  // here in one sentence; the full set and the pricing basis are one click
+  // down in "Show the working".
+  html += _diOptionsSummary(d.options, d.ticker);
+
   // ── The one caution that never collapses ───────────────────────────────
   html += `<div style="margin:14px 0;padding:11px 13px;background:rgba(255,234,0,.06);border:1px solid var(--yellow);border-radius:8px">
     <div style="font-size:12px;color:var(--text);line-height:1.6"><b style="color:var(--yellow)">Before you act —</b> ${esc(P.honesty || '')}</div>
@@ -2438,17 +2445,8 @@ function _paintDecisionIntelligence(d) {
   // equity decision above.
   const _opView = ((d.thesis || {}).direction === 'BULLISH') ? 'BULLISH'
                 : ((d.thesis || {}).direction === 'BEARISH') ? 'BEARISH' : '';
-  html += diDetails('Options — calls, puts and spreads for this view',
-    'from OptionsPilot, a separate service · loads on demand', `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px">
-      <button id="optionsLoadBtn" onclick="loadOptions('${esc(d.ticker)}', '${esc(_opView)}')"
-        style="background:var(--bg3);border:1px solid var(--accent2);color:var(--accent2);padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer">
-        Get option structures</button>
-      <span style="font-size:11px;color:var(--muted)">
-        ${_opView ? 'Hands OptionsPilot this engine\'s ' + esc(_opView.toLowerCase()) + ' read.'
-                  : 'No directional read to hand over, so OptionsPilot will use its own.'}</span>
-    </div>
-    <div id="optionsBody"></div>
+  html += diDetails('Options — every structure, and what each one costs',
+    _diOptSubtitle(d.options), _diOptionsFull(d.options, d.ticker) + `
 
     <!-- The other half of the loop. OptionsPilot weights this desk at 45% of
          its composite and reads it over HTTP; if the desk has not frozen a
@@ -2905,39 +2903,193 @@ function _optionsCandidate(c) {
 }
 
 function _paintOptions(o) {
+  // One renderer for both entry points. The brief renders the section it was
+  // handed; the re-price button renders the section it just fetched. They are
+  // the same shape on purpose — two renderers would drift, and the one that
+  // drifted would be the one nobody was looking at.
   const box = document.getElementById('optionsBody');
   if (!box) return;
-
-  if (o.status !== 'OK') {
-    box.innerHTML = `<div style="font-size:12px;color:var(--yellow);line-height:1.6">
-      ${esc(o.reason || 'OptionsPilot is not available.')}
-      ${o.authenticated === false ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">
-        Set <b>OPTIONSPILOT_ACCESS_CODE</b> in this service's environment to the current
-        OptionsPilot code. Nothing here can read or rotate it.</div>` : ''}
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">The equity decision above is
-        unaffected — it never depends on this link.</div></div>`;
+  if (!o || o.status !== 'OK') {
+    box.innerHTML = `<div style="padding:9px 11px;background:var(--bg3);border-radius:7px">
+      <div style="font-size:12px;color:var(--text);line-height:1.6">${esc((o && o.reason) || 'No structures were returned.')}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px">The equity decision above does not depend on this.</div>
+    </div>`;
     return;
   }
-
-  box.innerHTML = `
-    <div style="padding:10px 12px;background:rgba(124,58,237,.08);border:1px solid var(--accent2);border-radius:8px;margin-bottom:10px">
-      <div style="font-size:12px;color:var(--text);line-height:1.6">${esc(o.direction_source.statement)}</div>
+  box.innerHTML = `<div style="padding:9px 0">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:7px">
+      ${_diBasisChip(o)}
+      <span style="font-size:11px;color:var(--text)">Re-priced just now — ${esc(o.headline || '')}</span>
     </div>
-    <div style="font-size:12px;color:var(--text);margin-bottom:3px">${esc(o.headline)}</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:9px">
-      Priced ${esc(o.priced_at)} against a live chain. Ordered by: ${esc(o.criterion)}.</div>
+    ${(o.candidates || []).map(c => `<div style="font-size:12px;color:var(--text);line-height:1.6;padding:3px 0">
+      <b>${esc(c.label || '')}</b> — ${esc(c.plain || '')}</div>`).join('')}
+  </div>`;
+}
 
-    ${(o.candidates || []).map(_optionsCandidate).join('')}
+// ══════════════════════════════════════════════════════════════════════════
+// OPTIONS IN THE BRIEF — rendered from the payload, never fetched on a click
+//
+// This replaced a button that called OptionsPilot directly. When that
+// service's access code was absent or rotated the panel showed an error
+// where an analysis belongs, and the local pricing engine that could have
+// answered was never asked. The section is now part of the decision payload,
+// produced through the agent roster: live chain preferred, model engine as
+// the floor. The BASIS is shown prominently either way, because a quote and
+// a model price are different kinds of claim and must not look alike.
+// ══════════════════════════════════════════════════════════════════════════
 
-    ${(o.warnings || []).length ? `<div style="margin-bottom:9px">${(o.warnings || []).map(w =>
-      `<div style="font-size:11px;color:var(--yellow)">⚠ ${esc(w)}</div>`).join('')}</div>` : ''}
+function _diBasisChip(o) {
+  if (!o || o.status !== 'OK') return '';
+  return o.is_model_priced
+    ? `<span title="Priced from a model on realized volatility, not from live quotes"
+        style="font-size:9.5px;color:var(--yellow);border:1px solid var(--yellow);padding:2px 7px;border-radius:10px;white-space:nowrap">MODEL-PRICED</span>`
+    : `<span title="Priced from live option chain quotes"
+        style="font-size:9.5px;color:var(--green);border:1px solid var(--green);padding:2px 7px;border-radius:10px;white-space:nowrap">LIVE QUOTES</span>`;
+}
 
-    <div style="padding:10px 12px;background:rgba(255,234,0,.05);border:1px solid var(--yellow);border-radius:8px">
-      <div style="font-size:10px;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">What OptionsPilot says about its own output</div>
-      ${(o.honesty || []).map(h => `<div style="font-size:11px;color:var(--text);line-height:1.55;padding:2px 0">• ${esc(h)}</div>`).join('')}
-      <div style="font-size:11px;color:var(--text);line-height:1.55;padding:4px 0 0"><b>${esc(o.no_execution)}</b></div>
+function _diOptSubtitle(o) {
+  if (!o) return 'not computed';
+  if (o.status !== 'OK') return 'unavailable — the reason is inside';
+  return `${o.n_candidates} structure${o.n_candidates === 1 ? '' : 's'} · `
+       + `${o.is_model_priced ? 'model-priced by this desk' : 'live quotes'} · `
+       + `expiring ${esc(o.expiry || '')}`;
+}
+
+// The structure to lead with. Not "the best trade" — there is no such thing
+// without knowing the reader's risk tolerance. It is the one that matches the
+// desk's own conviction: a defined-risk debit spread when there is a
+// direction, because it expresses the view with a known worst case.
+function _diLeadStructure(o) {
+  const c = o.candidates || [];
+  if (!c.length) return null;
+  const prefer = ['bull_call_spread', 'bear_put_spread', 'iron_condor',
+                  'long_call', 'long_put', 'iron_butterfly'];
+  for (const name of prefer) {
+    const hit = c.find(x => x.structure === name);
+    if (hit) return hit;
+  }
+  return c[0];
+}
+
+function _diOptionsSummary(o, ticker) {
+  if (!o) return '';
+  if (o.status !== 'OK') {
+    return `<div style="margin:14px 0;padding:11px 13px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--border)">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Options</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.6">${esc(o.reason || 'No option structures could be built for this symbol.')}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px">The equity decision above does not depend on this.</div>
+    </div>`;
+  }
+  const lead = _diLeadStructure(o);
+  if (!lead) return '';
+  return `<div style="margin:14px 0;padding:11px 13px;background:rgba(124,58,237,.07);border:1px solid var(--accent2);border-radius:8px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <span style="font-size:10px;color:var(--accent2);text-transform:uppercase;letter-spacing:.5px">
+        The same view, expressed in options</span>
+      ${_diBasisChip(o)}
+      <span style="font-size:10px;color:var(--muted)">via ${esc(o.answered_by || '—')}</span>
     </div>
-    <div style="font-size:10px;color:var(--muted);margin-top:7px;line-height:1.5">${esc((o.source || {}).relationship || '')}</div>`;
+    <div style="font-size:13px;color:var(--text);line-height:1.6">
+      <b style="color:var(--accent2)">${esc(lead.label || '')}</b> — ${esc(lead.plain || '')}</div>
+    ${o.n_candidates > 1 ? `<div style="font-size:11px;color:var(--muted);margin-top:5px">
+      ${o.n_candidates - 1} other structure${o.n_candidates === 2 ? '' : 's'} for this view, with costs and odds, in
+      <i>Show the working</i> below.</div>` : ''}
+  </div>`;
+}
+
+function _diOptMoney(v, unbounded) {
+  if (unbounded) return 'uncapped';
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined,
+    {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function _diOptionsFull(o, ticker) {
+  if (!o) return '<div style="font-size:12px;color:var(--muted)">Options were not computed for this brief.</div>';
+  if (o.status !== 'OK') {
+    return `<div style="font-size:12px;color:var(--text);line-height:1.6">${esc(o.reason || 'Unavailable.')}</div>
+      ${_diOptTrace(o)}
+      <div style="font-size:11px;color:var(--muted);margin-top:7px">The equity decision above never depends on this section.</div>`;
+  }
+
+  let h = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:9px">
+    ${_diBasisChip(o)}
+    <span style="font-size:11px;color:var(--text)">${esc(o.headline || '')}</span>
+  </div>`;
+
+  // Each structure in words first, numbers second. The sentence is the part
+  // someone can act on; the table is the part they check it against.
+  h += (o.candidates || []).map(c => `
+    <div style="margin-bottom:9px;padding:9px 11px;background:var(--bg3);border-radius:7px">
+      <div style="font-size:12px;color:var(--text);font-weight:700">${esc(c.label || '')}
+        <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(c.legs_text || '')}</span></div>
+      <div style="font-size:12px;color:var(--text);line-height:1.6;margin-top:4px">${esc(c.plain || '')}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">
+        ${[['Cost', _diOptMoney(c.net_cost) + (c.cash_direction ? ' ' + esc(c.cash_direction.toLowerCase()) : '')],
+           ['Most you can make', _diOptMoney(c.max_gain, c.max_gain_unbounded)],
+           // Absolute value: the label already says "lose", so a minus sign
+           // in front of it reads as a double negative.
+           ['Most you can lose', _diOptMoney(c.max_loss === null || c.max_loss === undefined
+                                             ? null : Math.abs(c.max_loss))],
+           ['Reward vs risk', c.risk_reward_ratio ? c.risk_reward_ratio + '×' : '—'],
+           ['Odds', (c.probability_of_profit !== null && c.probability_of_profit !== undefined)
+             ? (c.probability_of_profit * 100).toFixed(0) + '%' : '—']]
+          .map(([k, v]) => `<div><div style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${k}</div>
+            <div style="font-size:12.5px;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums">${v}</div></div>`).join('')}
+      </div>
+      ${c.note ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:5px">${esc(c.note)}</div>` : ''}
+    </div>`).join('');
+
+  // The odds number needs its measure attached wherever it appears.
+  const pbasis = (o.candidates || [])[0] || {};
+  if (pbasis.probability_basis) {
+    h += `<div style="font-size:10.5px;color:var(--muted);line-height:1.5;margin-bottom:8px">
+      <b>Odds</b> above are ${esc(pbasis.probability_basis)}.</div>`;
+  }
+
+  if (o.upgrade) {
+    h += `<div style="margin-bottom:9px;padding:9px 11px;background:rgba(255,234,0,.06);border:1px solid var(--yellow);border-radius:7px">
+      <div style="font-size:11.5px;color:var(--text);line-height:1.6">${esc(o.upgrade)}</div></div>`;
+  }
+
+  if ((o.honesty || []).length) {
+    h += `<div style="margin-bottom:9px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">What these numbers are, and are not</div>
+      ${(o.honesty || []).map(x => `<div style="font-size:11.5px;color:var(--text);line-height:1.55;padding:2px 0">• ${esc(x)}</div>`).join('')}</div>`;
+  }
+
+  if ((o.direction_source || {}).statement) {
+    h += `<div style="font-size:11px;color:var(--muted);line-height:1.55;margin-bottom:7px">${esc(o.direction_source.statement)}</div>`;
+  }
+  if (o.expiry_note) {
+    h += `<div style="font-size:11px;color:var(--muted);line-height:1.55;margin-bottom:7px">
+      <b>Expiry ${esc(o.expiry || '')}</b> — ${esc(o.expiry_note)}</div>`;
+  }
+  h += _diOptTrace(o);
+  h += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <button id="optionsLoadBtn" onclick="loadOptions('${esc(ticker)}', '${esc(o.view === 'NONE_GIVEN' ? '' : (o.view || ''))}')"
+      style="background:var(--bg3);border:1px solid var(--accent2);color:var(--accent2);padding:5px 11px;border-radius:6px;font-size:11px;cursor:pointer">
+      Re-price now</button>
+    <span style="font-size:10.5px;color:var(--muted)">Asks the roster again — useful if a live chain has since become reachable.</span>
+  </div>
+  <div id="optionsBody" style="margin-top:8px"></div>
+  <div style="font-size:10.5px;color:var(--muted);margin-top:8px">${esc(o.no_execution || '')}</div>`;
+  return h;
+}
+
+function _diOptTrace(o) {
+  const t = o.trace || [];
+  if (!t.length) return '';
+  return `<details style="margin-top:8px;border:1px solid var(--border);border-radius:7px;background:var(--bg3)">
+    <summary style="cursor:pointer;padding:7px 10px;font-size:10.5px;color:var(--muted);list-style:none">
+      <span style="color:var(--accent);margin-right:5px">▸</span>Which specialist priced this, and who else was asked</summary>
+    <div style="padding:2px 10px 10px">
+      ${t.map(a => `<div style="font-size:11px;color:var(--muted);line-height:1.55;margin-top:3px">
+        <span style="color:${a.status === 'OK' ? 'var(--green)' : a.status === 'ERROR' ? 'var(--red)' : 'var(--muted)'}">${esc(a.status)}</span>
+        · ${esc(a.agent_id || '—')}${(a.elapsed_ms !== null && a.elapsed_ms !== undefined) ? ' · ' + a.elapsed_ms + 'ms' : ''}
+        ${a.reason ? '<br><span style="padding-left:12px">' + esc(a.reason) + '</span>' : ''}</div>`).join('')}
+    </div></details>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3169,9 +3321,13 @@ async function loadOptions(ticker, view) {
   const key = ticker + '::' + (view || 'none');
   if (_optionsCache[key]) { _paintOptions(_optionsCache[key]); return; }
 
-  if (btn) { btn.disabled = true; btn.textContent = 'Asking OptionsPilot…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Re-pricing…'; }
+  // "the roster", not "OptionsPilot": this asks the orchestrator, which tries
+  // a live chain first and falls back to this desk's own engine. Naming one
+  // specialist in the wait text set the expectation that a decline from it
+  // was a failure of the request.
   box.innerHTML = `<div style="font-size:12px;color:var(--accent);padding:8px 0">
-    ⏳ Pricing structures against a live chain — this takes a few seconds.</div>`;
+    ⏳ Asking the options specialists — a live chain first, this desk's engine if none answers.</div>`;
   try {
     const q = view ? ('?view=' + encodeURIComponent(view)) : '';
     const resp = await fetch(API_BASE + '/api/options/' + encodeURIComponent(ticker) + q);
@@ -3179,9 +3335,9 @@ async function loadOptions(ticker, view) {
     if (o.status === 'OK') _optionsCache[key] = o;
     _paintOptions(o);
   } catch (e) {
-    box.innerHTML = `<div style="color:var(--red);font-size:12px">Could not reach the options link: ${esc(e)}</div>`;
+    box.innerHTML = `<div style="color:var(--red);font-size:12px">Could not reach the options layer: ${esc(e)}</div>`;
   }
-  if (btn) { btn.disabled = false; btn.textContent = 'Reload'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Re-price now'; }
 }
 
 async function checkDeskCoverage(ticker) {
