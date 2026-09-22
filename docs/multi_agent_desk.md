@@ -17,6 +17,17 @@ Stock Agent is the **primary orchestrator**. Specialists answer to it.
 │  ~31 equities   │      │  every underlying  │     │  every underlying   │
 │  priority 10    │      │    priority 50     │     │    priority 20      │
 └─────────────────┘      └────────────────────┘     └─────────────────────┘
+┌─────────────────┐ ┌──────────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐
+│    research     │ │  backtester  │ │  regime  │ │ catalysts │ │portfolio │
+│  the desk's own │ │ beats hold?  │ │ market   │ │ what is   │ │ weights, │
+│  read, class-   │ │              │ │ context  │ │ scheduled │ │ what to  │
+│  aware          │ │              │ │          │ │           │ │ trim     │
+└─────────────────┘ └──────────────┘ └──────────┘ └───────────┘ └──────────┘
+                    ┌──────────────┐
+                    │ track_record │  the only MEASURED_LIVE basis here:
+                    │ what it got  │  outcomes frozen before they were known,
+                    │ right, graded│  which is the one claim that cannot be
+                    └──────────────┘  back-fitted
         │                                                      │
         └────────── findings return as DecisionEvidence ───────┘
 ```
@@ -133,6 +144,64 @@ Correlations join on **shared consecutive dates**. BTC has 184 bars over six
 months where the S&P has 127; zipping them correlates one asset's Monday with
 the other's previous Thursday. The overlap is reported (BTC/SPX: 249, not 365).
 
+## The conversational front door
+
+The ticker box asks one question in one way. `POST /api/chat` asks any of
+them, and the routing is **deterministic** — no LLM, no key, milliseconds.
+
+That is a choice, not a shortcut. An LLM can invent a ticker, and a
+hallucinated symbol yields a complete, confident analysis of a company nobody
+asked about. It cannot be graded against a frozen corpus without paying for it
+and accepting variance in the one component whose failures are silent. The
+analysis path here is keyless by design, so making the *front door* need a key
+would be the strictest dependency in the system. And the reasoning agents run
+at a 180-second timeout — right for them, unusable for a chat turn.
+
+**The corpus was written and frozen before the router existed.** 104
+utterances, phrased the way people speak, deliberately not derived from the
+keyword lists. A router graded on questions written from its own vocabulary
+cannot fail, and the coverage gap is exactly what such a test cannot see.
+
+| | Routing | Symbols |
+|---|---|---|
+| First measured run | **93%** | 96% |
+| After closing the five gaps it exposed | **99%** | **100%** |
+
+The one remaining miss is the case the corpus itself flags as genuinely
+ambiguous — *"is the call on AAPL earnings already priced in"* — and firing
+options on every bare "call" would misroute *"how did your last call turn out"*.
+
+### The wrong symbol is worse than none
+
+`ALL`, `IT`, `ON` and `A` are real US tickers and ordinary English words. They
+resolve only from a `$` prefix, a company cue, or being the whole message.
+Two real bugs came out of building that guard:
+
+- an unanchored lower-case scan chopped `report` into `repor` + `t` and
+  resolved **T** (AT&T) from inside a word
+- requiring capitals threw away `nvda vs amd`, which then *blocked* the
+  capability that had correctly fired — a routing success that looked like a
+  routing failure
+
+### Five outcomes, not one
+
+Routed · small talk · a capability question · a question with no subject · one
+that could not be read. Each needs a different thing said back.
+
+*"What's the best stock to buy"* routes **nowhere**, on purpose. Production
+found the sharp edge here: asked after a turn about NVDA, it inherited NVDA
+and was answered as research on it — the desk picking a name, which is the one
+thing the guard exists to prevent, defeated by the context it was supposed to
+be independent of. The guard now fires on context-supplied symbols too.
+
+### What carries between turns
+
+The **subject**, and nothing else. Re-answering from a cached read would serve
+yesterday's price as today's advice with nothing on screen to say so. So when
+a follow-up asks only for options, the direction is **re-derived** rather than
+remembered — without that, *"and the options?"* after an ACCUMULATE returned
+range structures, which is a different trade than the one just argued for.
+
 ## API
 
 | Route | Does |
@@ -141,6 +210,7 @@ the other's previous Thursday. The overlap is reported (BTC/SPX: 249, not 365).
 | `GET /api/mas/plan?symbol=` | routing only — **no I/O**, instant |
 | `POST /api/mas/ask` | classify, read, run specialists, synthesize |
 | `POST /api/mas/price` | price one named structure on any underlying |
+| `POST /api/chat` | the conversational front door — any question, any asset |
 
 All read-only. Nothing here places an order, connects to a broker for
 execution, or writes to another service.
