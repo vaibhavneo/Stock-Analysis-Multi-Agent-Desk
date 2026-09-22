@@ -1095,15 +1095,40 @@ def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = F
     try:
         from decision.options_overlay import view_for as _view_for
         from mas.options_brief import build as _build_options
-        _closes = [float(v) for v in df["Close"].tolist()]
-        _horizon = rec.get("time_horizon_days") or 45
-        decision["options"] = _build_options(
-            ticker,
-            view=_view_for(decision.get("thesis")),
-            closes=_closes,
-            days=max(21, min(int(_horizon), 120)),
-            metadata=fund,
-            spot=rec.get("current_price"))
+        from mas import policy as _policy
+        from mas.asset_class import classify as _classify
+
+        _view = _view_for(decision.get("thesis"))
+        _cls = _classify(ticker, fund)
+
+        # The orchestrator decides whether options are worth computing HERE,
+        # rather than computing them and letting the reader ignore them. With
+        # no directional view the only structures on offer are range trades
+        # the desk never argued for, and volunteering one is suggesting a bet
+        # the analysis does not support.
+        _pol = _policy.decide([], _cls["asset_class"], depth=_policy.BRIEF,
+                              direction=_view)
+        _dec = next((d for d in _pol.decisions
+                     if d.capability == "option_structures"), None)
+
+        if "option_structures" in _pol.run:
+            _closes = [float(v) for v in df["Close"].tolist()]
+            _horizon = rec.get("time_horizon_days") or 45
+            decision["options"] = _build_options(
+                ticker, view=_view, closes=_closes,
+                days=max(21, min(int(_horizon), 120)),
+                metadata=fund, spot=rec.get("current_price"))
+        else:
+            decision["options"] = {
+                "status": "NOT_RUN",
+                "reason": _dec.reason if _dec else "the orchestrator did not run it",
+                "candidates": [], "honesty": [], "trace": [],
+                "on_request": ("Ask for options on this name and they will be "
+                               "priced anyway — this is a judgement about what "
+                               "to volunteer, not a refusal."),
+                "no_execution": "Nothing in this system can place an order.",
+            }
+        decision["options_policy"] = _pol.to_dict()
     except Exception as e:
         decision["options"] = {
             "status": "UNAVAILABLE",
@@ -1378,6 +1403,42 @@ def options_run_endpoint():
 # ══════════════════════════════════════════════════════════════════════════
 _MAS_CACHE: dict = {}
 _MAS_CACHE_TTL_SEC = 180
+
+
+@app.route("/api/maintenance")
+def maintenance_status():
+    """What the scheduler has actually done. Reading this is how you find out
+    the record is maintaining itself — or that it stopped."""
+    try:
+        from data import maintenance as _m
+        rows = _m.status()
+        return jsonify({
+            "scheduler_enabled": os.getenv("MAINTENANCE_SCHEDULER", "1") != "0",
+            "interval_sec": float(os.getenv("MAINTENANCE_INTERVAL_SEC",
+                                            _m.DEFAULT_INTERVAL_SEC)),
+            "jobs": rows,
+            "note": ("grade_outcomes matures every frozen prediction whose "
+                     "horizon has elapsed. Idempotent, so a double run costs "
+                     "time and changes nothing."),
+        })
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
+@app.route("/api/maintenance/run", methods=["POST"])
+def maintenance_run():
+    """Force one job now. Still takes the lock, so it cannot race the
+    scheduled run."""
+    data = request.json or {}
+    job = (data.get("job") or "grade_outcomes").strip()
+    try:
+        from data import maintenance as _m
+        if job not in _m.JOBS:
+            return jsonify({"error": f"no such job: {job}",
+                            "jobs": sorted(_m.JOBS)}), 400
+        return jsonify(_m.run_job(job, force=True))
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -1961,6 +2022,19 @@ def price_history_endpoint():
         },
     })
 
+
+
+# ── Scheduled upkeep ──────────────────────────────────────────────────────
+# Started at IMPORT, not under __main__: production runs gunicorn, which
+# imports this module and never executes the __main__ block. Starting it there
+# is why a scheduler can look wired up and never run in the only environment
+# that needs it. Claiming is atomic, so both gunicorn workers starting one is
+# harmless — exactly one wins each cycle.
+try:
+    from data import maintenance as _maintenance
+    _maintenance.start()
+except Exception as _e:                      # never block serving on upkeep
+    print(f"[maintenance] could not start: {type(_e).__name__}: {_e}", flush=True)
 
 
 if __name__ == "__main__":

@@ -2987,6 +2987,7 @@ function _diBasisChip(o) {
 
 function _diOptSubtitle(o) {
   if (!o) return 'not computed';
+  if (o.status === 'NOT_RUN') return 'not run — the orchestrator explains why inside';
   if (o.status !== 'OK') return 'unavailable — the reason is inside';
   return `${o.n_candidates} structure${o.n_candidates === 1 ? '' : 's'} · `
        + `${o.is_model_priced ? 'model-priced by this desk' : 'live quotes'} · `
@@ -3011,6 +3012,21 @@ function _diLeadStructure(o) {
 
 function _diOptionsSummary(o, ticker) {
   if (!o) return '';
+  // NOT_RUN is a DECISION, not a failure, and must not read like one. The
+  // orchestrator judged that options would express a view the desk does not
+  // hold — offering a premium-selling trade to someone who asked about a
+  // share price is answering a question nobody posed.
+  if (o.status === 'NOT_RUN') {
+    return `<div style="margin:14px 0;padding:11px 13px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--accent2)">
+      <div style="font-size:10px;color:var(--accent2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Options — not run</div>
+      <div style="font-size:12px;color:var(--text);line-height:1.6">${esc(o.reason || '')}</div>
+      ${o.on_request ? `<div style="font-size:11px;color:var(--muted);margin-top:5px">${esc(o.on_request)}</div>` : ''}
+      <button onclick="loadOptions('${esc(ticker)}', '')"
+        style="margin-top:8px;background:var(--bg2);border:1px solid var(--accent2);color:var(--accent2);padding:5px 11px;border-radius:6px;font-size:11px;cursor:pointer">
+        Price them anyway</button>
+      <div id="optionsBody" style="margin-top:8px"></div>
+    </div>`;
+  }
   if (o.status !== 'OK') {
     return `<div style="margin:14px 0;padding:11px 13px;background:var(--bg3);border-radius:8px;border-left:3px solid var(--border)">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Options</div>
@@ -3046,8 +3062,16 @@ function _diOptMoney(v, unbounded) {
 function _diOptionsFull(o, ticker) {
   if (!o) return '<div style="font-size:12px;color:var(--muted)">Options were not computed for this brief.</div>';
   if (o.status !== 'OK') {
+    const judged = o.status === 'NOT_RUN';
     return `<div style="font-size:12px;color:var(--text);line-height:1.6">${esc(o.reason || 'Unavailable.')}</div>
+      ${o.on_request ? `<div style="font-size:11.5px;color:var(--muted);line-height:1.55;margin-top:6px">${esc(o.on_request)}</div>` : ''}
       ${_diOptTrace(o)}
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <button id="optionsLoadBtn" onclick="loadOptions('${esc(ticker)}', '')"
+          style="background:var(--bg3);border:1px solid var(--accent2);color:var(--accent2);padding:5px 11px;border-radius:6px;font-size:11px;cursor:pointer">
+          ${judged ? 'Price them anyway' : 'Try again'}</button>
+      </div>
+      <div id="optionsBody" style="margin-top:8px"></div>
       <div style="font-size:11px;color:var(--muted);margin-top:7px">The equity decision above never depends on this section.</div>`;
   }
 

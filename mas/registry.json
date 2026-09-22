@@ -1,6 +1,6 @@
 {
-  "_comment": "The sub-agent roster. Agents are DATA, not code \u2014 the same seam financial_data/registry.json draws for providers. Adding a specialist means adding an entry plus a module implementing mas/contract.py; the planner, the executor and the UI change not at all. `writes` is the field to read first: it names every side effect an agent can cause on another service, because a capability that mutates someone else's journal must never be reachable by the same automatic path as a read. `symbol_required: false` marks an agent that answers about the DESK or the MARKET rather than about a name \u2014 those stay eligible when the user asks 'how's the market' or 'what's your hit rate', where filtering by the asset class of a symbol that was never given would silently drop every one of them.",
-  "version": 2,
+  "_comment": "The sub-agent roster. Agents are DATA, not code \u2014 the same seam financial_data/registry.json draws for providers. Adding a specialist means adding an entry plus a module implementing mas/contract.py; the planner, the executor and the UI change not at all. `writes` is the field to read first: it names every side effect an agent can cause on another service, because a capability that mutates someone else's journal must never be reachable by the same automatic path as a read. `symbol_required: false` marks an agent that answers about the DESK or the MARKET rather than about a name \u2014 those stay eligible when the user asks 'how's the market' or 'what's your hit rate', where filtering by the asset class of a symbol that was never given would silently drop every one of them. `est_ms` is a MEASURED typical latency, used by mas/policy.py to spend a latency budget on the capabilities that add the most information. It is a planning input, never a timeout \u2014 timeouts stay per-agent in `timeout_sec`.",
+  "version": 3,
   "agents": {
     "options_pilot": {
       "id": "options_pilot",
@@ -28,7 +28,8 @@
         "run_pipeline": "freezes ideas into OptionsPilot's own journal on a different service; user-triggered only, never planned automatically"
       },
       "notes": "Strictly better than a model when it can answer: real quotes, a real IV surface, and its own forward record. It covers a bounded universe of ~31 names, so 'unavailable' here is the normal case, not a fault.",
-      "symbol_required": true
+      "symbol_required": true,
+      "est_ms": 2500
     },
     "derivatives": {
       "id": "derivatives",
@@ -57,7 +58,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Black-Scholes / CRR driven by REALIZED volatility. Priority 50 keeps it below OptionsPilot so a real chain always wins where one exists. Reliability 0.55 is not a slight on the arithmetic \u2014 it reflects that realized vol is the wrong input for an option price, and is the single largest source of error in anything this agent returns.",
-      "symbol_required": true
+      "symbol_required": true,
+      "est_ms": 120
     },
     "cross_asset": {
       "id": "cross_asset",
@@ -84,7 +86,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Each class gets the benchmark it is actually driven by \u2014 an altcoin against BTC, an equity against the S&P, a currency against the dollar index. Beta to the WRONG benchmark is the specific error this replaces: yfinance reports a 'beta' for a coin computed against the equity market, which is a number with no meaning that the risk pillar would otherwise consume.",
-      "symbol_required": true
+      "symbol_required": true,
+      "est_ms": 400
     },
     "research": {
       "id": "research",
@@ -111,7 +114,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "The orchestrator's own seat at its own table. Asset-class aware, so a coin is scored on the pillars that exist for it rather than on a fundamentals pillar filled with a neutral 50. `full` runs the complete Decision Intelligence build; without it, the fast pillar read.",
-      "symbol_required": true
+      "symbol_required": true,
+      "est_ms": 900
     },
     "backtester": {
       "id": "backtester",
@@ -138,7 +142,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Races the full strategy library net of realistic costs, against buy-and-hold. Shares the exact racer the decision brief uses, so the conversational answer and the written brief cannot disagree about whether the strategy works.",
-      "symbol_required": true
+      "symbol_required": true,
+      "est_ms": 2600
     },
     "track_record": {
       "id": "track_record",
@@ -165,7 +170,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Reads the append-only prediction ledger. The only capability here whose basis is MEASURED_LIVE rather than derived or modelled \u2014 it reports outcomes that were frozen before they were known, which is the one claim in this system that cannot be back-fitted.",
-      "symbol_required": false
+      "symbol_required": false,
+      "est_ms": 60
     },
     "regime": {
       "id": "regime",
@@ -192,7 +198,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Needs no symbol: it is a statement about conditions, not about a name. Answers 'how is the market' without pretending to answer 'will it crash'.",
-      "symbol_required": false
+      "symbol_required": false,
+      "est_ms": 520
     },
     "catalysts": {
       "id": "catalysts",
@@ -215,7 +222,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Equities and funds only, and that limit is real rather than a gap: a coin has no earnings date, so declining for one is the correct answer instead of an empty calendar that looks like a quiet week.",
-      "symbol_required": true
+      "symbol_required": true,
+      "est_ms": 240
     },
     "portfolio": {
       "id": "portfolio",
@@ -242,7 +250,8 @@
       "requires_key": null,
       "writes": {},
       "notes": "Declines rather than assuming when no holdings are supplied. A portfolio review built on inferred positions would be advice about a portfolio nobody owns.",
-      "symbol_required": false
+      "symbol_required": false,
+      "est_ms": 4000
     }
   }
 }

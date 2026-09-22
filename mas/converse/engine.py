@@ -71,6 +71,23 @@ def turn(text: str, session_id: Optional[str] = None,
     results: Dict[str, Any] = {}
     symbols = parsed.get("symbols") or []
     subject = symbols[0] if symbols else sess.get("subject")
+    policy_out: Dict[str, Any] = {}
+
+    if parsed.get("kind") == "QUERY":
+        # Depth CHAT implies NOTHING. A question about a share price is a
+        # question about a share price: the router found what was asked for,
+        # and the orchestrator adds no specialists on top of it. Running the
+        # decisions through the policy anyway keeps one vocabulary for why a
+        # capability ran, wherever the request came from.
+        from ..asset_class import classify as _classify
+        from ..policy import decide as _decide, CHAT as _CHAT
+        _cls = _classify(subject or "")
+        _pol = _decide(parsed["capabilities"], _cls["asset_class"],
+                       depth=_CHAT, have_symbol=bool(subject),
+                       have_holdings=bool(holdings))
+        policy_out = _pol.to_dict()
+        parsed = dict(parsed)
+        parsed["capabilities"] = _pol.run
 
     if parsed.get("kind") == "QUERY":
         view = None
@@ -144,6 +161,7 @@ def turn(text: str, session_id: Optional[str] = None,
             "scores": parsed.get("scores"),
         },
         "reply": answer,
+        "policy": policy_out,
         "trace": trace,
         "elapsed_ms": int((time.time() - t0) * 1000),
     }

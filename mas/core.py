@@ -152,12 +152,21 @@ def ask(symbol: str, period: str = "1y", capabilities=None,
     core = core_read(symbol, period=period) if include_core else None
     view = (core or {}).get("view")
 
+    # The orchestrator chooses what to ask for. Capabilities the CALLER named
+    # are explicit and always run; the rest are implied by the depth of the
+    # request and are run only where they would add something.
+    from .policy import decide as _decide, FULL as _FULL
+    pol = _decide(capabilities or [], (core or {}).get("asset_class")
+                  or classify(symbol)["asset_class"],
+                  depth=_FULL, direction=view)
+
     # One classification, shared. The planner must see what the read saw.
     plan = build_plan(symbol, metadata=(core or {}).get("identity"),
-                      capabilities=capabilities, view=view, params=params)
+                      capabilities=pol.run, view=view, params=params)
     execution = execute(plan)
     answer = synthesize(execution, core=core)
 
+    answer["policy"] = pol.to_dict()
     answer["classification"] = (core or {}).get("classification") or \
         plan.get("classification")
     answer["core"] = core
