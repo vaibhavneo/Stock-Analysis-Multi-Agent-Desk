@@ -1380,6 +1380,38 @@ _MAS_CACHE: dict = {}
 _MAS_CACHE_TTL_SEC = 180
 
 
+@app.route("/api/chat", methods=["POST"])
+def chat_endpoint():
+    """The conversational front door.
+
+    Body: {message, session_id?, holdings?, full?}
+
+    Routing is deterministic (see mas/converse/intent.py) so this answers in
+    milliseconds, needs no API key, and can be graded against a frozen corpus.
+    It reads only: the one capability that would mutate another service is
+    excluded from planning by the registry.
+    """
+    data = request.json or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "No message"}), 400
+    if len(message) > 500:
+        return jsonify({"error": "Message too long (500 characters max)"}), 400
+
+    holdings = data.get("holdings")
+    if holdings is not None and not isinstance(holdings, list):
+        return jsonify({"error": "holdings must be a list"}), 400
+
+    try:
+        from mas.converse import turn
+        return jsonify(turn(message,
+                            session_id=data.get("session_id"),
+                            holdings=holdings,
+                            full_research=bool(data.get("full"))))
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
 @app.route("/api/mas/agents")
 def mas_agents_endpoint():
     """The sub-agent roster. Reads the registry; touches no specialist."""

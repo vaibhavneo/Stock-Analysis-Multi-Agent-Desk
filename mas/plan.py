@@ -64,6 +64,9 @@ def build_plan(symbol: str,
     asset_class = cls["asset_class"]
     spec = spec_for(asset_class)
     wanted = tuple(capabilities or DEFAULT_CAPABILITIES)
+    # An empty or unclassifiable symbol is not a failure for every capability:
+    # "how's the market" and "what's your hit rate" are complete questions.
+    have_symbol = bool(cls["symbol"]) and asset_class != "UNKNOWN"
     base_params = dict(params or {})
     if view:
         base_params["view"] = view
@@ -77,9 +80,12 @@ def build_plan(symbol: str,
                              "reason": f"{cap!r} is not a known capability"})
             continue
 
-        offering = registry.agents(capability=cap, asset_class=asset_class)
+        offering = registry.agents(capability=cap, asset_class=asset_class,
+                                   have_symbol=have_symbol)
         if not offering:
-            all_offering = registry.agents(capability=cap)
+            all_offering = registry.agents(capability=cap, have_symbol=have_symbol)
+            if not all_offering:
+                all_offering = registry.agents(capability=cap)
             names = ", ".join(a["id"] for a in all_offering) or "no agent"
             declined.append({
                 "agent_id": None, "capability": cap,

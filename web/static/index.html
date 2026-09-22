@@ -300,6 +300,9 @@
     <button class="btn-analyze" id="quickRecTopBtn" onclick="quickRecStandalone()"
       style="background:var(--bg3);color:var(--accent);border:1px solid var(--border)"
       title="Keyless 7-pillar computed recommendation — no LLM, no API key needed">🏛️ Quick Rec</button>
+    <button class="btn-analyze" id="chatToggleBtn" onclick="toggleChatCard()"
+      style="background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700"
+      title="Ask in plain English — the desk routes your question to whichever specialists can answer">💬 Ask the desk</button>
     <button class="btn-analyze" id="masToggleBtn" onclick="toggleMasCard()"
       style="background:var(--bg3);color:var(--yellow);border:1px solid var(--border)"
       title="Any asset class — equities, crypto, currencies, indices, commodities. Routes to whichever specialist can answer.">🌐 Any Asset</button>
@@ -341,6 +344,41 @@
     <button class="qbtn" onclick="quickAnalyze('SPY')">SPY</button>
     <button class="qbtn" onclick="quickAnalyze('BTC-USD')">BTC</button>
   </div>
+</div>
+
+<div class="card" id="chatCard" style="display:none;margin:16px 24px;max-width:1400px;margin-left:auto;margin-right:auto">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>💬 Ask the desk <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">— plain English; it routes to whichever specialists can answer</span></span>
+    <button onclick="toggleChatCard()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>
+  </div>
+
+  <div id="chatLog" style="max-height:52vh;overflow-y:auto;padding:4px 2px 8px;display:flex;flex-direction:column;gap:10px"></div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+    <input type="text" id="chatInput" maxlength="500" autocomplete="off"
+      placeholder="e.g. should I buy NVDA — and show me the options"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"
+      style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:11px 13px;border-radius:9px;font-size:14px;outline:none;transition:border-color .2s"
+      onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+    <button class="btn-analyze" id="chatSendBtn" onclick="sendChat()" style="padding:11px 20px;font-size:14px">Send</button>
+  </div>
+
+  <!-- Openers that span the capability set, so the roster is discoverable by
+       clicking rather than by guessing what it understands. -->
+  <div class="quick-picks" style="opacity:.85;margin-top:9px">
+    <span>Try:</span>
+    <button class="qbtn" onclick="askChat('what can you do')">what can you do</button>
+    <button class="qbtn" onclick="askChat('should I buy NVDA')">should I buy NVDA</button>
+    <button class="qbtn" onclick="askChat('show me call options on AAPL')">options on AAPL</button>
+    <button class="qbtn" onclick="askChat(\'how&#39;s the market\')">how&#39;s the market</button>
+    <button class="qbtn" onclick="askChat('what is your hit rate')">your hit rate</button>
+    <button class="qbtn" onclick="askChat('when does NVDA report earnings')">NVDA earnings</button>
+    <button class="qbtn" onclick="askChat('is ETH just following bitcoin')">ETH vs bitcoin</button>
+    <button class="qbtn" onclick="askChat('backtest TSLA')">backtest TSLA</button>
+  </div>
+  <div style="font-size:10px;color:var(--muted);margin-top:8px">
+    Reads only. Nothing here places an order, and nothing writes to another service.
+    Routing is deterministic — no API key is used to understand your question.</div>
 </div>
 
 <div class="card" id="masCard" style="display:none;margin:16px 24px;max-width:1400px;margin-left:auto;margin-right:auto">
@@ -3090,6 +3128,157 @@ function _diOptTrace(o) {
         · ${esc(a.agent_id || '—')}${(a.elapsed_ms !== null && a.elapsed_ms !== undefined) ? ' · ' + a.elapsed_ms + 'ms' : ''}
         ${a.reason ? '<br><span style="padding-left:12px">' + esc(a.reason) + '</span>' : ''}</div>`).join('')}
     </div></details>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ASK THE DESK — the conversational front door
+//
+// The ticker box asks one question in one way. This asks any of them, and
+// shows WHAT IT UNDERSTOOD before the answer, because a conversational
+// interface is the easiest place in a system to lose the difference between
+// "the specialist said no" and "nobody asked it".
+// ══════════════════════════════════════════════════════════════════════════
+let _chatSession = null;
+let _chatBusy = false;
+
+function toggleChatCard() {
+  const c = document.getElementById('chatCard');
+  const open = c.style.display === 'none';
+  c.style.display = open ? 'block' : 'none';
+  if (open) {
+    if (!document.getElementById('chatLog').children.length) {
+      _chatPush('agent', {
+        headline: '',
+        blocks: [{capability: null, lines: [
+          "Ask me about a stock, the market, your portfolio, or how this desk has actually done.",
+          "A bare ticker works — so does **BTC-USD**, **EURUSD=X** or **GC=F**. Follow-ups keep the subject, so \"and the options?\" does what you'd expect."
+        ]}]
+      });
+    }
+    document.getElementById('chatInput').focus();
+  }
+}
+
+function askChat(text) {
+  document.getElementById('chatInput').value = text;
+  sendChat();
+}
+
+// Minimal inline formatting: **bold**, *italic* and "- " bullets. Everything
+// is escaped first — replies quote provider text and symbol names, and an
+// unescaped one would be an injection vector into the desk's own page.
+function _chatMd(line) {
+  let h = esc(line);
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  h = h.replace(/(^|[\s(])\*([^*]+)\*/g, '$1<i>$2</i>');
+  if (/^-\s+/.test(line)) {
+    h = '<span style="color:var(--muted)">•</span> ' + h.replace(/^-\s+/, '');
+    return `<div style="padding-left:10px">${h}</div>`;
+  }
+  return `<div>${h}</div>`;
+}
+
+function _chatPush(who, payload, understood, trace) {
+  const log = document.getElementById('chatLog');
+  const wrap = document.createElement('div');
+
+  if (who === 'user') {
+    wrap.style.cssText = 'align-self:flex-end;max-width:78%;background:var(--accent2);color:#fff;'
+      + 'padding:9px 13px;border-radius:13px 13px 3px 13px;font-size:13.5px;line-height:1.5';
+    wrap.textContent = payload;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+    return wrap;
+  }
+
+  wrap.style.cssText = 'align-self:flex-start;max-width:92%;background:var(--bg3);'
+    + 'padding:11px 14px;border-radius:13px 13px 13px 3px;font-size:13.5px;line-height:1.65;color:var(--text)';
+
+  let h = '';
+
+  // What it understood, before the answer. Routing is the component whose
+  // failures are silent, so it is shown rather than inferred from the reply.
+  if (understood && understood.kind === 'QUERY') {
+    const caps = (understood.capabilities || []).map(c => c.replace(/_/g, ' '));
+    h += `<div style="font-size:10px;color:var(--muted);margin-bottom:7px;letter-spacing:.3px">
+      understood: <b style="color:var(--accent)">${esc((understood.symbols || []).join(', ') || 'no symbol')}</b>`
+      + (understood.from_context ? ' <span title="carried from the previous message">(from context)</span>' : '')
+      + ` → ${esc(caps.join(' · '))}</div>`;
+  }
+
+  (payload.blocks || []).forEach(b => {
+    const declined = b.declined;
+    h += `<div style="margin-bottom:8px${declined ? ';opacity:.85' : ''}">`;
+    (b.lines || []).forEach(l => { h += _chatMd(l); });
+    if (b.answered_by) {
+      h += `<div style="font-size:10px;color:var(--muted);margin-top:3px">via ${esc(b.answered_by)}</div>`;
+    }
+    h += '</div>';
+  });
+
+  if (trace && trace.length) {
+    h += `<details style="margin-top:4px">
+      <summary style="cursor:pointer;font-size:10.5px;color:var(--muted);list-style:none">
+        <span style="color:var(--accent)">▸</span> who ran, and who declined</summary>
+      <div style="padding:5px 0 2px">
+        ${trace.map(t => `<div style="font-size:10.5px;color:var(--muted);line-height:1.5">
+          <span style="color:${t.status === 'OK' ? 'var(--green)' : t.status === 'ERROR' ? 'var(--red)' : 'var(--muted)'}">${esc(t.status)}</span>
+          · ${esc(t.agent_id || '—')} · ${esc((t.capability || '').replace(/_/g, ' '))}${
+            (t.elapsed_ms !== null && t.elapsed_ms !== undefined) ? ' · ' + t.elapsed_ms + 'ms' : ''}
+          ${t.reason ? '<br><span style="padding-left:12px">' + esc(t.reason) + '</span>' : ''}</div>`).join('')}
+      </div></details>`;
+  }
+
+  wrap.innerHTML = h;
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return wrap;
+}
+
+async function sendChat() {
+  if (_chatBusy) return;
+  const input = document.getElementById('chatInput');
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+  _chatPush('user', text);
+
+  _chatBusy = true;
+  const btn = document.getElementById('chatSendBtn');
+  btn.disabled = true; btn.textContent = '…';
+  const thinking = _chatPush('agent', {blocks: [{capability: null, lines: ['*Asking the specialists…*']}]});
+
+  try {
+    const body = {message: text, session_id: _chatSession};
+    // Portfolio questions are answerable only from holdings the user has
+    // actually entered. Nothing is inferred; if the list is empty the
+    // specialist declines and says so.
+    if (typeof loadPortfolio === 'function') {
+      try {
+        const hs = loadPortfolio();
+        if (hs && hs.length) body.holdings = hs;
+      } catch (e) { /* portfolio is optional context */ }
+    }
+    const r = await fetch(API_BASE + '/api/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    thinking.remove();
+    if (d.error) {
+      _chatPush('agent', {blocks: [{capability: null, lines: ['Something broke on my side: ' + d.error]}]});
+    } else {
+      _chatSession = d.session.session_id;
+      _chatPush('agent', d.reply, d.understood, d.trace);
+    }
+  } catch (e) {
+    thinking.remove();
+    _chatPush('agent', {blocks: [{capability: null, lines: ['Could not reach the desk: ' + String(e)]}]});
+  } finally {
+    _chatBusy = false;
+    btn.disabled = false; btn.textContent = 'Send';
+    input.focus();
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
