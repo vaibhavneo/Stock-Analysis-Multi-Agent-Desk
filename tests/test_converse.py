@@ -323,6 +323,35 @@ def test_routing_does_no_network_io():
         socket.socket = real
 
 
+def test_an_accumulating_record_is_distinguished_from_an_empty_one():
+    """Production held 20 matured predictions and reported "nothing has
+    matured yet". Those are different facts, and the second is the useful
+    one — it says the record is filling and what it is waiting for."""
+    from decision.track_record import LIVE_SAMPLE_READABLE
+    empty = reply_mod._say_record({"live_record": {"rows": [], "total_matured": 0}}, "")
+    check("truly empty says so", "No frozen prediction has matured" in empty[0], empty)
+
+    partial = reply_mod._say_record(
+        {"live_record": {"total_matured": 20,
+                         "rows": [{"horizon_days": 1, "n": 18, "readable": False},
+                                  {"horizon_days": 5, "n": 12, "readable": False}]}}, "")
+    text = " ".join(partial)
+    check("it reports what HAS matured", "20 prediction" in text, text)
+    check("it names the largest sample", "18" in text, text)
+    check("and the bar it is short of", str(LIVE_SAMPLE_READABLE) in text, text)
+    check("no win rate is quoted below the bar", "%" not in text, text)
+
+
+def test_a_readable_record_quotes_the_rate():
+    out = reply_mod._say_record(
+        {"live_record": {"total_matured": 1498,
+                         "rows": [{"horizon_days": 20, "n": 300, "win_rate": 0.515,
+                                   "avg_excess_return_pct": -0.34, "readable": True}]}}, "")
+    text = " ".join(out)
+    check("the rate appears", "51.5%" in text, text)
+    check("with its sample size", "300" in text, text)
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

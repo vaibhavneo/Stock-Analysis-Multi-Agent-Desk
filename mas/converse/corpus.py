@@ -176,6 +176,14 @@ CASES: List[Dict[str, Any]] = [
      "note": "no symbol and no universe — must ask, not guess"},
     {"q": "tell me what to do with my money", "caps": [], "symbols": [],
      "note": "must not be routed to anything"},
+    # Added after production testing, and kept separate in spirit from the
+    # frozen set: this case was FOUND in production, not imagined. With a
+    # prior turn about NVDA, the no-subject guard was bypassed because the
+    # context had supplied a symbol, and the desk answered "pick me a stock"
+    # by analysing the last one mentioned.
+    {"q": "what's the best stock to buy", "caps": [], "symbols": [],
+     "context": "NVDA",
+     "note": "the guard must hold even when the conversation has a subject"},
     {"q": "asdfgh", "caps": [], "symbols": []},
     {"q": "buy", "caps": [], "symbols": [], "note": "a verb with no object"},
 

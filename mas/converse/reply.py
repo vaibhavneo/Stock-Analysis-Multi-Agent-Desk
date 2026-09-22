@@ -142,8 +142,26 @@ def _say_backtest(d: Dict[str, Any], symbol: str) -> List[str]:
 
 def _say_record(d: Dict[str, Any], symbol: str) -> List[str]:
     lr = d.get("live_record") or {}
-    rows = [r for r in (lr.get("rows") or []) if r.get("readable")]
+    all_rows = lr.get("rows") or []
+    rows = [r for r in all_rows if r.get("readable")]
     if not rows:
+        # "Nothing has matured" and "some has matured but not enough to quote"
+        # are different facts, and the second is the more useful one: it tells
+        # the user the record is accumulating and what it is waiting for.
+        # Production reported the first while holding 20 matured predictions.
+        from decision.track_record import LIVE_SAMPLE_READABLE
+        total = lr.get("total_matured") or 0
+        best = max((r.get("n") or 0) for r in all_rows) if all_rows else 0
+        if total:
+            return [
+                f"Not yet — and I would rather say so than round up. "
+                f"{total:,} prediction{'s' if total != 1 else ''} of mine "
+                f"{'have' if total != 1 else 'has'} matured, but the largest "
+                f"sample at any single horizon is {best:,}, and I do not quote "
+                f"a win rate below {LIVE_SAMPLE_READABLE}. Under that, the "
+                f"number moves more with luck than with skill.",
+                "Ask me again as it fills in. Nothing here is a backtest "
+                "dressed up as a record."]
         return ["No frozen prediction has matured yet, so I have no measured "
                 "record to show you. I'd rather say that than quote a backtest "
                 "as if it were a track record."]

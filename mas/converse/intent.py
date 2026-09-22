@@ -236,7 +236,14 @@ def parse(text: str, context_symbol: Optional[str] = None) -> Dict[str, Any]:
             f"{sym['symbols'][0]} was named with no more specific question, so "
             "this is read as a request for the full read on it.")
 
-    if NO_SUBJECT.search(raw) and not sym["symbols"]:
+    # Checked against symbols the TEXT named, not against inherited ones. In
+    # production "what's the best stock to buy" arrived after a turn about
+    # NVDA, inherited NVDA, and was answered as a research request on it — the
+    # desk picking a name, which is the single thing this guard exists to
+    # prevent, defeated by the context it was supposed to be independent of.
+    # A request for a name the user has not chosen cannot be satisfied by the
+    # last name they mentioned.
+    if NO_SUBJECT.search(raw) and (not sym["symbols"] or sym["from_context"]):
         out["kind"] = "NEEDS_SUBJECT"
         out["capabilities"] = []
         out["clarification"] = (
