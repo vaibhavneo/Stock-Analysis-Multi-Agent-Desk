@@ -202,6 +202,78 @@ a follow-up asks only for options, the direction is **re-derived** rather than
 remembered — without that, *"and the options?"* after an ACCUMULATE returned
 range structures, which is a different trade than the one just argued for.
 
+## The orchestrator decides what to call
+
+Two callers used to ask for a fixed set every time, so *"how does AAPL look"*
+paid for an options analysis nobody wanted — and on a name with no directional
+view it **volunteered range structures the desk had never argued for**.
+Suggesting a premium-selling trade to someone who asked about a share price is
+not thoroughness; it is answering a question nobody posed.
+
+`mas/policy.py` decides per request, against a measured latency budget, and
+records a reason for **every skip as well as every run** — a capability that
+silently did not run is indistinguishable from one that ran and found nothing.
+
+**Explicit always runs.** Ask for options on a coin with no venue and no view
+and they are still priced. A layer that decides it knows better than a stated
+request is not autonomy, it is refusal — so autonomy applies only to
+capabilities *implied* by the shape of the request, never to ones that were
+named. Four tests exist only to hold that line.
+
+| Depth | Implies | Used by |
+|---|---|---|
+| `CHAT` | nothing | the conversation — the router found what was asked |
+| `BRIEF` | options | "analyse this name" |
+| `FULL` | options, benchmark | the multi-asset panel |
+
+Measured in production:
+
+| Request | Agents called |
+|---|---|
+| "how does AAPL look" | **research** |
+| "how does AAPL look **and show me the options**" | research, options_pilot, derivatives |
+| AAPL brief (bullish equity) | options run |
+| EUR/USD brief (bullish, no venue) | options **NOT_RUN**, with the reason |
+
+The UI renders `NOT_RUN` as a judgement with a *"price them anyway"* button,
+never as a failure.
+
+## Scheduled upkeep
+
+Production held **55 frozen predictions and 0 graded ones**. Every part of the
+learning loop existed; nothing on the deployed service ever ran the grader —
+the only thing that did was a LaunchAgent on a laptop. A loop with no clock
+does not fail loudly, it just never produces evidence.
+
+`data/maintenance.py` grades every six hours. Only grading: the heartbeat's
+other steps cost ~15 minutes of a web dyno, and production already accumulates
+snapshots from live use.
+
+It is started at **import**, not under `__main__` — gunicorn imports the module
+and never runs that block, which is exactly how a scheduler looks wired up and
+never runs in the only environment that needs it.
+
+Three bugs found building it, all of the silent kind:
+
+- **Timezone skew.** SQLite's `strftime('%s', …)` parses a naive ISO string as
+  UTC while `datetime.now()` writes local time. On any host not set to UTC a
+  just-finished job reads as finished *in the future*, so it is never due
+  again — the scheduler starts, logs nothing, and never runs. Comparisons now
+  use float epochs Python produced.
+- **Lock contention.** Concurrent claims raised `database is locked` on 2 of 8
+  threads, because the schema script ran on every connection —
+  `executescript()` issues an implicit COMMIT and takes a write lock. Schema
+  now runs once per database per process, and a locked database reads as *not
+  claimed*, which is what it means: the only other writer is another worker
+  claiming the same job. 12 racing workers → 1 claim, 0 errors.
+- **The suite was starting it.** Tests import `web.app`, so every run spawned a
+  thread fetching price history and writing to the *real* ledger while the
+  tests pointed it at temp files.
+
+Verified firing on its own in production: claimed 07:18:51, finished 07:18:59,
+55 snapshots evaluated, 330 outcome rows, 20 matured, 0 errors — and `runs: 1`,
+so only one of the two workers took it.
+
 ## API
 
 | Route | Does |
@@ -211,6 +283,8 @@ range structures, which is a different trade than the one just argued for.
 | `POST /api/mas/ask` | classify, read, run specialists, synthesize |
 | `POST /api/mas/price` | price one named structure on any underlying |
 | `POST /api/chat` | the conversational front door — any question, any asset |
+| `GET /api/maintenance` | what the scheduler has actually done |
+| `POST /api/maintenance/run` | force one job now (still takes the lock) |
 
 All read-only. Nothing here places an order, connects to a broker for
 execution, or writes to another service.
