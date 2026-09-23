@@ -70,7 +70,28 @@ def compose(result: Dict[str, Any]) -> Dict[str, Any]:
                         f"once, never assumed.")
     blocks.append({"capability": None, "lines": head})
 
-    # 2. The evidence, strongest tier first.
+    # 2. THE ANSWER. The decision sections this question asked for lead,
+    # because a question about adding wants the add verdict before it wants
+    # the evidence that produced it.
+    dec = result.get("decision") or {}
+    for sec in (dec.get("sections") or []):
+        if sec.get("status") == "NOT_PRODUCED":
+            continue
+        lines = [f"**{sec['title']} — {sec['status'].replace('_', ' ')}**"]
+        if sec.get("headline"):
+            lines.append(sec["headline"])
+        for x in (sec.get("detail") or [])[:5]:
+            lines.append(f"- {x}")
+        blocks.append({"capability": sec.get("source"), "lines": lines})
+
+    not_produced = [s for s in (dec.get("sections") or [])
+                    if s.get("status") == "NOT_PRODUCED"]
+    if not_produced:
+        blocks.append({"capability": None, "declined": True, "lines":
+                       ["**Asked for but not produced**"]
+                       + [f"- {s['title']}: {s['headline']}" for s in not_produced]})
+
+    # 3. The evidence, strongest tier first.
     usable = [i for i in ev if i.get("usable_for_decision")]
     if usable:
         lines = ["**What the evidence says**"]
@@ -79,12 +100,12 @@ def compose(result: Dict[str, Any]) -> Dict[str, Any]:
                          f"*({i['source']}, {i['tier'].replace('_', ' ').lower()})*")
         blocks.append({"capability": None, "lines": lines})
 
-    # 3. Synthesis — the part that is not a list.
+    # 4. Synthesis — the part that is not a list.
     if syn.get("statement"):
         blocks.append({"capability": None,
                        "lines": [f"**Together:** {syn['statement']}"]})
 
-    # 4. What was not reachable. Absence is reported, never rendered neutral.
+    # 5. What was not reachable. Absence is reported, never rendered neutral.
     gaps = [i for i in ev if "unavailable" in (i.get("flags") or [])]
     missing_tools = [m for m in (plan.get("missing") or [])]
     if gaps or missing_tools:
@@ -96,14 +117,14 @@ def compose(result: Dict[str, Any]) -> Dict[str, Any]:
         lines.append("None of this is treated as a neutral reading.")
         blocks.append({"capability": None, "declined": True, "lines": lines})
 
-    # 4b. What moved since last time. Placed before the counter-case because
+    # 6. What moved since last time. Placed before the counter-case because
     # a reader returning to a name wants the delta first.
     ch = result.get("change") or {}
     if ch.get("has_previous") and ch.get("n_material"):
         blocks.append({"capability": None, "lines": [
             "**What changed since last time**", ch["statement"]]})
 
-    # 5. The counter-case, when the evidence was strong enough to earn one.
+    # 7. The counter-case, when the evidence was strong enough to earn one.
     adv = result.get("adversarial") or {}
     if adv.get("statement"):
         blocks.append({"capability": None, "lines": [
@@ -111,7 +132,7 @@ def compose(result: Dict[str, Any]) -> Dict[str, Any]:
             f"*Raised because {(result.get('escalation') or {}).get('reasons', [''])[0]}*"
         ]})
 
-    # 6. Contradictions, if the validator found any.
+    # 8. Contradictions, if the validator found any.
     if val.get("issues"):
         lines = ["**Internal checks**"]
         for i in val["issues"]:

@@ -335,6 +335,86 @@ def research(question: str,
                   "summary": ex["trace"].summary()},
         "elapsed_ms": int((time.time() - t0) * 1000),
     })
+    # The decision engine's own fields, selected by what was asked. It
+    # produced a state, an add verdict, an entry plan, invalidation triggers
+    # and a monitoring schedule all along; the research answer reached them
+    # and rendered none, so an ADD question got evidence and synthesis while
+    # `add_analysis.verdict` sat one dict away and unread.
+    from .decision import build as _build_decision
+    decision_obj = None
+    for cap, step in (ex["steps"] or {}).items():
+        if cap == "equity_research" and isinstance(step.data, dict):
+            decision_obj = step.data.get("decision")
+            break
+    out["decision"] = _build_decision(decision_obj, plan.intent)
+
+    # Change detection runs BEFORE the contract check, because
+    # `changed_since_previous` is a contract field and stamping it afterwards
+    # would report every specialist as non-compliant on a field the pipeline
+    # had simply not filled in yet. The prior is read before this result is
+    # stored, or the comparison would be against itself.
+    try:
+        from .change import compare, UNCHANGED
+        from . import snapshots
+        prior = snapshots.latest(primary) if primary else None
+        out["change"] = compare(prior, out)
+        by_key = {c["key"]: c for c in (out["change"].get("changes") or [])}
+        for i in ledger.items:
+            c = by_key.get(i.key)
+            i.changed_since_previous = (
+                c["kind"] if c else
+                ("NO_PRIOR" if not out["change"].get("has_previous")
+                 else UNCHANGED))
+        out["evidence"] = ledger.to_dict()
+        if primary:
+            snapshots.save(primary, out)
+    except Exception as e:
+        out["change"] = {"has_previous": False, "changes": [],
+                         "statement": f"Change detection was unavailable "
+                                      f"({type(e).__name__})."}
+        for i in ledger.items:
+            i.changed_since_previous = "UNKNOWN"
+
+    # Did each specialist meet the contract it was given? Reported, never
+    # enforced by rejection: discarding a useful answer over a missing key
+    # would be a worse failure than the one being checked for.
+    from .delegation import (validate_response as _contract,
+                             REQUIRED_FIELDS as _REQUIRED)
+    compliance = []
+    for cap, step in (ex["steps"] or {}).items():
+        if step.outcome != T.SUCCESS:
+            continue
+        mine = [i for i in ledger.items
+                if i.provenance.get("capability") == cap]
+        if not mine:
+            compliance.append({"capability": cap, "complete": False,
+                               "present": [], "missing": list(_REQUIRED),
+                               "statement": ("ran, but produced no normalised "
+                                             "evidence, so nothing entered "
+                                             "the comparison")})
+            continue
+        # Checked on the NORMALISED evidence — that is the layer the contract
+        # lives at and the layer synthesis compares. Checking the raw adapter
+        # payload measured the wrong thing and reported 0 of 4.
+        worst = min((_contract(cap, i.contract()) for i in mine),
+                    key=lambda c: len(c["present"]))
+        worst["n_items"] = len(mine)
+        compliance.append(worst)
+    out["specialist_contract"] = {
+        "checked": compliance,
+        "n_complete": sum(1 for c in compliance if c["complete"]),
+        "n_checked": len(compliance),
+        "statement": (
+            (lambda n, t: (
+                f"All {t} specialists returned the full structured contract."
+                if n == t and t else
+                f"{n} of {t} specialists returned the full structured "
+                f"contract; the remaining {t - n} answered and had their gaps "
+                f"recorded rather than their evidence discarded."
+                if t else "No specialist produced evidence to check."))(
+                    sum(1 for c in compliance if c["complete"]), len(compliance))),
+    }
+
     # Depth is decided AFTER the first pass, from what it actually found —
     # not from the wording of the question. An ADVERSARIAL pass runs only
     # when the evidence is strong enough that nobody would otherwise look for
@@ -346,20 +426,6 @@ def research(question: str,
 
     if esc["to"] == "ADVERSARIAL":
         out["adversarial"] = _challenge(out)
-
-    # What changed since this name was last researched. The prior is read
-    # BEFORE this result is stored, or the comparison would be against itself.
-    try:
-        from .change import compare
-        from . import snapshots
-        prior = snapshots.latest(primary) if primary else None
-        out["change"] = compare(prior, out)
-        if primary:
-            snapshots.save(primary, out)
-    except Exception as e:
-        out["change"] = {"has_previous": False, "changes": [],
-                         "statement": f"Change detection was unavailable "
-                                      f"({type(e).__name__})."}
 
     out["_ledger"] = ledger
     return out
@@ -393,6 +459,15 @@ def _default_runner(symbol: str, asset_class: str, plan):
         for a in agents:
             mod = registry.load_adapter(a["id"])
             params: Dict[str, Any] = {}
+            brief = next((c.get("brief") for c in (plan.capabilities or [])
+                          if c["capability"] == capability), None)
+            if brief:
+                # The specialist receives the specific question it must
+                # settle. Adapters that ignore it are unchanged; the one that
+                # reads it (the LLM analysts) stops being asked "analyze this
+                # stock".
+                params["research_question"] = brief["question"]
+                params["expects"] = brief["expects"]
             if capability == "equity_research":
                 if position:
                     params["position"] = position

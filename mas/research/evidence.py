@@ -68,12 +68,48 @@ class Item:
     value: Any = None
     provenance: Dict[str, Any] = field(default_factory=dict)
     flags: List[str] = field(default_factory=list)
+    # The specialist contract's remaining two fields. `uncertainty` is stated
+    # rather than inferred from confidence, because "I am 60% confident" and
+    # "the sample is too small to say" are different admissions and only the
+    # second names what would fix it.
+    uncertainty: str = ""
+    changed_since_previous: Optional[str] = None
 
     def __post_init__(self):
         if self.tier not in TIER_RANK:
             raise ValueError(f"unknown evidence tier {self.tier!r}")
         self.confidence = max(0.0, min(1.0, float(self.confidence or 0.0)))
         self.reliability = max(0.0, min(1.0, float(self.reliability or 0.0)))
+
+    def contract(self) -> Dict[str, Any]:
+        """This item in the specialist-contract shape, which is what the
+        synthesis layer compares. The contract lives HERE rather than on the
+        raw adapter payload: adapters return whatever their engine produces,
+        and normalisation is what makes five specialists comparable."""
+        return {
+            "finding": self.statement,
+            "direction": self.direction,
+            "horizon": self.horizon,
+            "confidence": self.confidence,
+            "data_quality": self.freshness,
+            "provenance": self.provenance,
+            "decision_relevance": self.decision_relevance,
+            "uncertainty": self.uncertainty or self._default_uncertainty(),
+            "changed_since_previous": self.changed_since_previous,
+        }
+
+    def _default_uncertainty(self) -> str:
+        if "insufficient_sample" in self.flags:
+            return "the sample is too small to distinguish skill from luck"
+        if "derived_only" in self.flags:
+            return "derived from arithmetic rather than observed trading"
+        if "unavailable" in self.flags:
+            return "the source could not be reached, so nothing is claimed"
+        if self.freshness == STALE:
+            return "the underlying data is stale"
+        if self.confidence < 0.4:
+            return "the producer's own confidence is low"
+        return "within the normal error of this measurement"
 
     @property
     def usable_for_decision(self) -> bool:

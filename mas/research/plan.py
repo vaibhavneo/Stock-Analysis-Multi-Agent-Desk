@@ -376,6 +376,16 @@ def build_plan(question: str,
                 f"no reachable tool provides it, so that part of the answer "
                 f"will say UNAVAILABLE rather than be estimated.")
 
+    # Each specialist gets the specific question it must settle, what it is
+    # handed, and the fields it owes back. "Analyze this stock" produces five
+    # overlapping essays; a specific question produces an answer the
+    # orchestrator can compare without reading any of them.
+    try:
+        from .delegation import attach as _attach_briefs
+        _attach_briefs(plan)
+    except Exception:
+        pass
+
     # Independent capabilities run together; nothing here depends on another
     # capability's output, so one parallel stage is honest. Sequencing appears
     # when a dependency does (see execute.py).

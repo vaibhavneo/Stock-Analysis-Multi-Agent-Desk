@@ -309,10 +309,17 @@ class Analysts:
         try:
             import os
             from agents.orchestrator import analyze_stock
+            # The specific research question, when the planner supplied one.
+            # Without it the five analysts are asked "analyze this stock" and
+            # return five overlapping essays; with it each answers the thing
+            # the plan actually needs settled.
+            question = request.params.get("research_question")
             res = analyze_stock(
                 request.symbol,
                 api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
                 verbose=False)
+            if question:
+                res["research_question"] = question
             if res.get("error"):
                 return unavailable(Analysts.AGENT_ID, request.capability,
                                    str(res["error"]))
