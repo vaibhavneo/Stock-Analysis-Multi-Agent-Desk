@@ -98,6 +98,34 @@ class Trace:
         }
 
 
+# Values that must never reach a trace, an evidence item or a reply. An
+# adapter that puts a credential into its own exception message — "auth failed
+# with sk-..." — is the realistic way a key reaches a user-visible trace, and
+# no amount of care inside adapters makes that impossible. Redaction therefore
+# happens at the boundary every message crosses.
+_SECRET_ENV = ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPTIONSPILOT_ACCESS_CODE",
+               "TIINGO_API_KEY", "FINNHUB_API_KEY", "OPENAI_API_KEY")
+_SECRET_SHAPES = (
+    r"sk-[A-Za-z0-9\-_]{16,}",
+    r"AKIA[0-9A-Z]{16}",
+    r"Bearer\s+[A-Za-z0-9\-._~+/]{20,}",
+)
+
+
+def redact(text: str) -> str:
+    """Strip anything credential-shaped, and any live credential value."""
+    import os as _os
+    import re as _re
+    out = str(text or "")
+    for name in _SECRET_ENV:
+        val = _os.environ.get(name)
+        if val and len(val) >= 8 and val in out:
+            out = out.replace(val, f"[{name} redacted]")
+    for shape in _SECRET_SHAPES:
+        out = _re.sub(shape, "[redacted]", out)
+    return out
+
+
 def _bounded(fn: Callable[[], Any], timeout_sec: float) -> Dict[str, Any]:
     """Run `fn` on an abandonable thread. Returns outcome + value/error."""
     box: Dict[str, Any] = {}
@@ -119,7 +147,7 @@ def _bounded(fn: Callable[[], Any], timeout_sec: float) -> Dict[str, Any]:
                 "reason": f"no answer within {timeout_sec:g}s"}
     if "error" in box:
         e = box["error"]
-        msg = f"{type(e).__name__}: {e}"
+        msg = redact(f"{type(e).__name__}: {e}")
         low = msg.lower()
         if "rate" in low and "limit" in low:
             return {"outcome": T.RATE_LIMITED, "elapsed_ms": elapsed, "reason": msg}
@@ -186,11 +214,11 @@ def run_stage(capabilities: List[Dict[str, Any]],
         step.elapsed_ms = out["elapsed_ms"]
         if out["outcome"] != T.SUCCESS:
             step.outcome = out["outcome"]
-            step.reason = out["reason"]
+            step.reason = redact(out["reason"])
         else:
             cls = _classify_result(out.get("value"))
             step.outcome = cls["outcome"]
-            step.reason = cls.get("reason", "")
+            step.reason = redact(cls.get("reason", ""))
             step.records = cls.get("records", 0)
             step.data = cls.get("value")
         with lock:
