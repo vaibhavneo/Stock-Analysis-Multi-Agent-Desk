@@ -81,10 +81,16 @@ class Trace:
     def summary(self) -> Dict[str, Any]:
         ok = [s for s in self.steps if s.outcome == T.SUCCESS]
         used = [s for s in ok if s.consumed]
+        weighed = [s for s in ok if s.changed_synthesis]
+        # READ and WEIGHED are different facts. Every item synthesis
+        # categorises is read; only the directional ones enter the weighing.
+        # Reporting the second as though it were the first said "1 of 4 used"
+        # beside a ledger holding ten decision-usable items.
         return {
             "n_steps": len(self.steps),
             "n_success": len(ok),
             "n_consumed": len(used),
+            "n_weighed": len(weighed),
             "n_produced_but_unconsumed": len(ok) - len(used),
             "unconsumed": [s.capability for s in ok if not s.consumed],
             "outcomes": {s.capability: s.outcome for s in self.steps},
@@ -92,8 +98,9 @@ class Trace:
             "budget_ms": self.budget_ms,
             "within_budget": not self.over_budget(),
             "statement": (
-                f"{len(ok)} of {len(self.steps)} steps produced evidence and "
-                f"{len(used)} of those were used; "
+                f"{len(ok)} of {len(self.steps)} steps produced evidence; "
+                f"{len(used)} were read by synthesis and {len(weighed)} "
+                f"entered the directional weighing. "
                 f"{self.elapsed_ms}ms of a {self.budget_ms}ms budget."),
         }
 

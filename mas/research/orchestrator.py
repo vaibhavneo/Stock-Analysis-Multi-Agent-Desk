@@ -315,11 +315,13 @@ def research(question: str,
 
     # Consumption is recorded on the STEP, so tool value can be measured
     # later: a capability that produced evidence nothing used is visible.
-    consumed_sources = {i.source for i in ledger.consumed()}
+    weighed_keys = set(syn.get("weighed_keys") or [])
+    consumed_keys = {i.key for i in ledger.consumed()}
     for cap, step in (ex["steps"] or {}).items():
-        step.consumed = any(
-            i.source in consumed_sources for i in ledger.items
-            if i.provenance.get("capability") == cap)
+        mine = [i for i in ledger.items
+                if i.provenance.get("capability") == cap]
+        step.consumed = any(i.key in consumed_keys for i in mine)
+        step.changed_synthesis = any(i.key in weighed_keys for i in mine)
 
     # Recomputed AFTER consumption is marked. The first version reported the
     # summary built during execution, which was necessarily "0 used" because

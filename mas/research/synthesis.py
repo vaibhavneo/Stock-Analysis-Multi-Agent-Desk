@@ -162,8 +162,14 @@ def synthesize(ledger: Ledger,
     low_conf = [i.key for i in items
                 if i.usable_for_decision and i.confidence < 0.35]
 
-    for i in usable:
+    # Synthesis READS every item — it categorises each one as directional,
+    # neutral, non-directional, missing or stale, and each of those
+    # categorisations reaches the statement. So every item is consumed, and
+    # the narrower fact — which ones entered the directional WEIGHING — is
+    # reported separately rather than as if it were the same thing.
+    for i in items:
         ledger.mark_consumed(i.key)
+    weighed = {i.key for i in usable}
 
     lines: List[str] = []
     if agree_bull and agree_bear:
@@ -254,6 +260,7 @@ def synthesize(ledger: Ledger,
         "stale_evidence": stale,
         "low_confidence_evidence": low_conf,
         "n_usable": len(usable),
+        "weighed_keys": sorted(weighed),
         "n_directional_sources": len({i.source for i in usable}),
         "directional_but_not_weighed": sorted(
             {i.source for i in directional if not i.usable_for_decision}),
