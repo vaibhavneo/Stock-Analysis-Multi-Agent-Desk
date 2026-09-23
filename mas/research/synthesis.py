@@ -193,18 +193,35 @@ def synthesize(ledger: Ledger,
     # tier — which a reader is entitled to weigh for themselves.
     offset = [i for i in directional if not i.usable_for_decision]
     if offset:
-        for side, label in ((BULLISH, "offsets"), (BEARISH, "adds to")):
+        # Whether it OFFSETS or REINFORCES depends on which way the weighed
+        # evidence actually leans. The first version always said "offsets the
+        # negative reading", which on a bullish read described a negative
+        # reading that did not exist.
+        leaning = (BULLISH if bull_w > bear_w else
+                   BEARISH if bear_w > bull_w else None)
+        for side in (BULLISH, BEARISH):
             group = sorted({i.source for i in offset if i.direction == side})
             if not group:
                 continue
-            against = "negative" if side == BULLISH else "positive"
+            if leaning is None:
+                relation = "leans " + side.lower()
+            elif side == leaning:
+                relation = "reinforces the " + (
+                    "constructive" if leaning == BULLISH else "negative")
+                relation += " reading"
+            else:
+                relation = "cuts against the " + (
+                    "constructive" if leaning == BULLISH else "negative")
+                relation += " reading"
             why = ("it is interpretation rather than measurement"
                    if all(i.tier in (INTERPRETATION, LLM_EXPLANATION)
                           for i in offset if i.direction == side)
                    else "it is stale or carries no demonstrated reliability")
+            verb_s = "" if len(group) > 1 else "s"
             lines.append(
-                f"{_join(group)} {label} the {against} reading, but does not "
-                f"enter the weighing: {why}.")
+                f"{_join(group)} {relation.replace('reinforces', 'reinforce' + verb_s).replace('cuts', 'cut' + verb_s).replace('leans', 'lean' + verb_s)}, "
+                f"but {'do' if len(group) > 1 else 'does'} not enter the "
+                f"weighing: {why}.")
     if not decision_changing and conflicts:
         lines.append(
             f"{len(conflicts)} disagreement{'s' if len(conflicts) != 1 else ''} "

@@ -1137,6 +1137,16 @@ def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = F
             "no_execution": "Nothing in this system can place an order.",
         }
 
+    # The seven pillars, carried onto the decision. `_recommendation` is a
+    # trimmed copy that drops them, so the research layer — which treats each
+    # pillar as its own evidence source — had nothing to read and every
+    # synthesis came back with one directional item.
+    try:
+        decision["pillars"] = rec.get("pillars")
+        decision["pillar_weights"] = rec.get("weights")
+    except Exception:
+        decision["pillars"] = None
+
     # ── Freshness: how old is the price this was computed on? ─────────────
     # The brief showed "PRICE NOW" against a settled daily bar, so on any day
     # whose session had closed but not yet published, the headline price and

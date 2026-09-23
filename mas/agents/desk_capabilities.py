@@ -223,6 +223,12 @@ class Research:
                                        ((d.get("risk_budget") or {}).get("volatility") or {}).get("annualization_days"),
                                },
                                "levels": d.get("level_map"),
+                               # Each pillar is its own measurement from its
+                               # own source, and the research layer emits them
+                               # as separate evidence. Omitting them left one
+                               # directional item per request, which made
+                               # every synthesis read INSUFFICIENT.
+                               "pillars": d.get("pillars"),
                            },
                            "level_map": d.get("level_map"),
                            "scenarios": d.get("scenarios")})

@@ -585,6 +585,116 @@ def test_a_clean_answer_passes():
     check("no errors", v["n_errors"] == 0, v["issues"])
 
 
+# ── Escalation ────────────────────────────────────────────────────────────
+
+def _res(consensus, ratio, sources, intent, changing=0, missing=None, items=None):
+    return {"synthesis": {"consensus": consensus, "agreement_ratio": ratio,
+                          "n_directional_sources": sources,
+                          "n_decision_changing": changing},
+            "plan": {"intent": intent, "missing": missing or []},
+            "evidence": {"items": items or []}}
+
+
+def test_a_coherent_fast_pass_is_not_escalated():
+    from mas.research.escalate import decide_depth
+    d = decide_depth(_res("AGREEMENT", 0.7, 3, "GENERAL_RESEARCH"))
+    check("stays fast", d["to"] == FAST, d)
+    check("and says going deeper would change nothing",
+          "change nothing" in d["statement"], d["statement"])
+
+
+def test_conflict_escalates_to_deep():
+    from mas.research.escalate import decide_depth
+    d = decide_depth(_res("CONFLICTED", 0.5, 4, "NEW_ENTRY", changing=2))
+    check("goes deep", d["to"] == DEEP, d)
+    check("naming the disagreements", "decision-changing" in d["statement"])
+
+
+def test_strong_agreement_on_a_consequential_decision_earns_a_challenge():
+    from mas.research.escalate import decide_depth
+    from mas.research.plan import ADVERSARIAL
+    d = decide_depth(_res("STRONG_AGREEMENT", 1.0, 3, "ADD_TO_POSITION"))
+    check("goes adversarial", d["to"] == ADVERSARIAL, d)
+    check("because nobody looks for the counter-case then",
+          "counter-case" in d["statement"], d["statement"])
+
+
+def test_one_source_at_100_percent_is_not_strong_agreement():
+    """A ratio of 1.0 from a single source is one measurement dividing by
+    itself. Challenging it as consensus would dress a thin reading as a
+    robust one."""
+    from mas.research.escalate import decide_depth
+    from mas.research.plan import ADVERSARIAL
+    d = decide_depth(_res("INSUFFICIENT_EVIDENCE", 1.0, 1, "ADD_TO_POSITION"))
+    check("not adversarial", d["to"] != ADVERSARIAL, d)
+
+
+def test_the_escalation_reason_matches_the_target_it_escalated_to():
+    """A flat reason list reported an intermediate escalation's reason beside
+    the final target — 'escalating to adversarial' followed by why it went
+    deep."""
+    from mas.research.escalate import decide_depth
+    d = decide_depth(_res("STRONG_AGREEMENT", 1.0, 3, "ADD_TO_POSITION"))
+    check("the stated reason belongs to the final target",
+          "counter-case" in d["reasons"][0], d["reasons"])
+
+
+# ── Adversarial ───────────────────────────────────────────────────────────
+
+def test_the_challenge_is_built_from_evidence_not_invented():
+    from mas.research.adversarial import challenge
+    items = [{"key": "research:composite", "source": "research",
+              "direction": "BULLISH", "weight": 0.1, "flags": [],
+              "statement": "composite reads ACCUMULATE"},
+             {"key": "stats:backtest", "source": "backtester",
+              "direction": "NOT_DIRECTIONAL", "weight": 0.2,
+              "flags": ["no_demonstrated_edge"],
+              "statement": "Nothing beat holding"}]
+    c = challenge({"synthesis": {"bullish_weight": 0.1, "bearish_weight": 0.0,
+                                 "n_directional_sources": 1},
+                   "evidence": {"items": items},
+                   "plan": {"required_evidence": [], "horizon": {"days": 126},
+                            "missing": []}})
+    check("it identifies a false-positive risk", c["false_positive_risks"], c)
+    check("tied to the flagged item",
+          any(r["what"] == "stats:backtest" for r in c["false_positive_risks"]))
+    check("and names the single-source weakness",
+          any("single measurement" in r["why"] or "one source" in r["why"]
+              for r in c["false_positive_risks"]), c["false_positive_risks"])
+
+
+def test_no_opposing_evidence_is_stated_as_such_not_fabricated():
+    from mas.research.adversarial import challenge
+    c = challenge({"synthesis": {"bullish_weight": 0.3, "bearish_weight": 0.0,
+                                 "n_directional_sources": 2},
+                   "evidence": {"items": [
+                       {"key": "a", "source": "research", "direction": "BULLISH",
+                        "weight": 0.3, "flags": [], "statement": "x"}]},
+                   "plan": {"required_evidence": [], "horizon": {"days": 126},
+                            "missing": []}})
+    check("it says nothing argues the other way",
+          c["challenges"][0]["kind"] == "NO_OPPOSING_EVIDENCE", c["challenges"])
+    check("and flags that as suspicious rather than reassuring",
+          "not looked for" in c["challenges"][0]["statement"])
+
+
+def test_a_catalyst_outside_the_horizon_cannot_falsify_within_it():
+    from mas.research.adversarial import challenge
+    c = challenge({"synthesis": {"bullish_weight": 0.3, "bearish_weight": 0.0,
+                                 "n_directional_sources": 2},
+                   "evidence": {"items": [
+                       {"key": "catalyst:next", "source": "catalysts",
+                        "direction": "NOT_DIRECTIONAL", "weight": 0.5,
+                        "flags": [], "value": 56,
+                        "statement": "Earnings in 56 days"}]},
+                   "plan": {"required_evidence": [], "horizon": {"days": 21},
+                            "missing": []}})
+    f = [x for x in c["falsifiers"] if x["from"] == "catalyst:next"]
+    check("the falsifier is qualified", f, c["falsifiers"])
+    check("because it falls outside the horizon",
+          "outside this horizon" in f[0]["condition"], f)
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

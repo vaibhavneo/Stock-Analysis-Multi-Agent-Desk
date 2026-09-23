@@ -96,7 +96,15 @@ def compose(result: Dict[str, Any]) -> Dict[str, Any]:
         lines.append("None of this is treated as a neutral reading.")
         blocks.append({"capability": None, "declined": True, "lines": lines})
 
-    # 5. Contradictions, if the validator found any.
+    # 5. The counter-case, when the evidence was strong enough to earn one.
+    adv = result.get("adversarial") or {}
+    if adv.get("statement"):
+        blocks.append({"capability": None, "lines": [
+            "**The case against this**", adv["statement"],
+            f"*Raised because {(result.get('escalation') or {}).get('reasons', [''])[0]}*"
+        ]})
+
+    # 6. Contradictions, if the validator found any.
     if val.get("issues"):
         lines = ["**Internal checks**"]
         for i in val["issues"]:

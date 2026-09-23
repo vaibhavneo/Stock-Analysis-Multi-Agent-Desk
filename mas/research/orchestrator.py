@@ -35,6 +35,20 @@ from .synthesis import synthesize
 # not listed contributes nothing to the weighing rather than contributing an
 # untyped item — an unclassified claim is exactly what the tier system exists
 # to prevent.
+# What kind of claim each pillar actually is.
+PILLAR_TIER = {
+    "fundamentals": OBSERVATION,       # reported financials
+    "technical": MODEL_OUTPUT,         # a voting meter over indicators
+    "algo": MODEL_OUTPUT,              # quantitative signals
+    "risk": OBSERVATION,               # measured volatility and drawdown
+    "research": INTERPRETATION,        # analyst consensus, an opinion poll
+    "social": INTERPRETATION,          # sentiment from a self-selected crowd
+}
+
+# Pillars that measure something real but take no side. Risk is the canonical
+# one: "less risky" is not the same claim as "goes up".
+NON_DIRECTIONAL_PILLARS = frozenset({"risk"})
+
 DIRECTION_FROM_ACTION = {
     "BUY": "BULLISH", "ACCUMULATE": "BULLISH",
     "REDUCE": "BEARISH", "SELL": "BEARISH", "HOLD": "NEUTRAL",
@@ -65,12 +79,51 @@ def _items_from(capability: str, data: Any, horizon: str) -> List[Item]:
             out.append(Item(
                 key="research:composite", tier=MODEL_OUTPUT,
                 statement=f"Composite {core.get('composite')} reads {action}",
-                source="research", direction=DIRECTION_FROM_ACTION.get(action, "NEUTRAL"),
+                # NOT "research": there is also a `research` PILLAR (analyst
+                # consensus), and calling both by one name made the synthesis
+                # list a single source twice.
+                source="composite", direction=DIRECTION_FROM_ACTION.get(action, "NEUTRAL"),
                 horizon=horizon, reliability=rel, confidence=0.8,
                 freshness=FRESH, observed_at=now, value=core.get("composite"),
                 decision_relevance="DECISIVE",
                 provenance={"capability": capability,
                             "weights": core.get("weights")}))
+        # EACH PILLAR IS ITS OWN SOURCE. Emitting only the composite meant one
+        # directional item per request, so every synthesis reported
+        # INSUFFICIENT_EVIDENCE — technically true and practically useless,
+        # because the pillars are separate measurements of separate things
+        # and their agreement or disagreement is the whole question.
+        #
+        # Tiers differ by what each pillar actually is: reported financials
+        # are an observation, a voting meter over indicators is a model
+        # output, and a sentiment ratio from a self-selected population is an
+        # interpretation that must not weigh on a decision.
+        pillars = core.get("pillars") or {}
+        for name, meta in (pillars.items() if isinstance(pillars, dict) else []):
+            if not isinstance(meta, dict) or meta.get("applicable") is False:
+                continue
+            score = meta.get("score")
+            if score is None:
+                continue
+            tier = PILLAR_TIER.get(name, MODEL_OUTPUT)
+            direction = ("NOT_DIRECTIONAL" if name in NON_DIRECTIONAL_PILLARS
+                         else "BULLISH" if score > 55
+                         else "BEARISH" if score < 45 else "NEUTRAL")
+            out.append(Item(
+                key=f"pillar:{name}", tier=tier,
+                statement=(f"{name.capitalize()} scores {score:g}"
+                           + ("" if direction == "NOT_DIRECTIONAL"
+                              else f" ({direction.lower()})")),
+                source=name, direction=direction, horizon=horizon,
+                reliability=rel,
+                confidence=float(meta.get("confidence") or 0.5),
+                freshness=FRESH, observed_at=now, value=score,
+                flags=list(meta.get("flags") or []),
+                decision_relevance=("CONTEXT" if tier == INTERPRETATION
+                                    else "SUPPORTING"),
+                provenance={"capability": capability, "pillar": name,
+                            "backtestable": meta.get("backtestable")}))
+
         # Levels and scenarios are REQUIRED evidence for several intents, so
         # they have to leave the capability as items. Emitting only the
         # composite made every plan that needed them look unmet.
@@ -280,6 +333,18 @@ def research(question: str,
                   "summary": ex["trace"].summary()},
         "elapsed_ms": int((time.time() - t0) * 1000),
     })
+    # Depth is decided AFTER the first pass, from what it actually found —
+    # not from the wording of the question. An ADVERSARIAL pass runs only
+    # when the evidence is strong enough that nobody would otherwise look for
+    # the counter-case.
+    from .escalate import decide_depth
+    from .adversarial import challenge as _challenge
+    esc = decide_depth(out, current=depth)
+    out["escalation"] = esc
+
+    if esc["to"] == "ADVERSARIAL":
+        out["adversarial"] = _challenge(out)
+
     out["_ledger"] = ledger
     return out
 
