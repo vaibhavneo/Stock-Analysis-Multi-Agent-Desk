@@ -251,6 +251,7 @@ def build(result: Dict[str, Any]) -> Dict[str, Any]:
             f"All {len(out)} brief sections were produced."
             if len(produced) == len(out) else
             f"{len(produced)} of {len(out)} brief sections were produced; the "
-            f"other {len(out) - len(produced)} are named with the reason "
-            f"rather than filled in."),
+            f"other {len(out) - len(produced)} "
+            f"{'is' if len(out) - len(produced) == 1 else 'are'} named with "
+            f"the reason rather than filled in."),
     }

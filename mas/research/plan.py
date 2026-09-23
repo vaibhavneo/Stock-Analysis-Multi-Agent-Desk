@@ -161,8 +161,13 @@ SPECS: Dict[str, IntentSpec] = {
         note="This is the question the old router could not answer at all."),
     COMPARISON: IntentSpec(
         objective="Compare two or more securities on the same basis",
-        required=(THESIS, RISK, BENCHMARK),
-        optional=(LEVELS, STATISTICAL_EDGE), default_horizon=UNSPECIFIED),
+        required=(THESIS, RISK, BENCHMARK, LEVELS),
+        optional=(STATISTICAL_EDGE, SCENARIOS), default_horizon=UNSPECIFIED,
+        note=("The decision sections describe the FIRST named symbol. This "
+              "engine builds a decision for one security at a time, so a "
+              "comparison puts two reads side by side rather than producing "
+              "a single verdict over both — and says so rather than letting "
+              "the reader assume otherwise.")),
     PORTFOLIO_CONTEXT: IntentSpec(
         objective="Assess the book rather than a single name",
         required=(POSITION_CONTEXT, RISK), optional=(BENCHMARK, REGIME),
