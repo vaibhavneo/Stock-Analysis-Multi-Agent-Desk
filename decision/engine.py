@@ -282,6 +282,16 @@ def build_decision_intelligence(
     #        deliberately excluded from the fingerprint below.
     decision["plain"] = build_plain_summary(decision)
 
+    # What each section of the working CHANGED. Computed last, because it
+    # reads every other section — and deliberately BEFORE the fingerprint, so
+    # two decisions that differ only in what constrained them fingerprint
+    # differently rather than looking identical.
+    try:
+        from decision.bearing import build_bearing
+        decision["bearing"] = build_bearing(decision)
+    except Exception:
+        decision["bearing"] = {}
+
     decision["decision_fingerprint"] = _fingerprint(decision)
     return decision
 
