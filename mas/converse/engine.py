@@ -27,6 +27,16 @@ from .intent import parse
 GLOBAL_CAPS = frozenset({"market_regime", "forward_record", "portfolio_review",
                          "strategy_backtest"})
 
+# Intents whose answer is a DECISION rather than a lookup. These are the ones
+# the flat capability path answered badly — a position question got a
+# composite score, and "what would invalidate this" got nothing at all.
+RESEARCH_INTENTS = frozenset({
+    "ADD_TO_POSITION", "REDUCE_POSITION", "EXIT_POSITION",
+    "EXISTING_POSITION", "NEW_ENTRY", "INVALIDATION", "RISK_ANALYSIS",
+    "EARNINGS_PREVIEW", "SHORT_TERM_SETUP", "MEDIUM_TERM_SETUP",
+    "LONG_TERM_THESIS",
+})
+
 
 def _run_capability(cap: str, symbol: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """One capability for one subject, through the roster."""
@@ -62,7 +72,8 @@ def _options_for(symbol: str, view: Optional[str]) -> Dict[str, Any]:
 
 def turn(text: str, session_id: Optional[str] = None,
          holdings: Optional[List[Dict[str, Any]]] = None,
-         full_research: bool = False) -> Dict[str, Any]:
+         full_research: bool = False,
+         supplied_position: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Answer one message. Never raises."""
     t0 = time.time()
     sess = session_mod.get(session_id)
@@ -143,7 +154,35 @@ def turn(text: str, session_id: Optional[str] = None,
                 step["unanswered_reason"] = ANALYST_STREAMING_ROUTE
             results[cap] = step
 
-    answer = reply_mod.compose(parsed, results, subject)
+    # Decision-shaped questions go through the RESEARCH pipeline: plan,
+    # discovery, parallel execution, tiered evidence, synthesis, validation.
+    # The flat capability dispatch above answered "should I add?" with a
+    # composite score while add_analysis, the entry plan and the invalidation
+    # sat unreachable — the defect the baseline audit named.
+    research_out = None
+    if parsed.get("kind") == "QUERY" and subject:
+        try:
+            from ..research.orchestrator import research as _research
+            from ..research.plan import SPECS as _SPECS
+            from ..research.intent import classify as _rclassify
+            from ..research.intent_corpus import NONE as _RNONE
+            from ..research import reply as _rreply
+            from ..research.validate import validate as _validate
+
+            _ri = _rclassify(text, context_symbol=sess.get("subject"),
+                             has_symbol=bool(symbols), n_symbols=len(symbols))
+            if _ri["intent"] in RESEARCH_INTENTS:
+                research_out = _research(
+                    text, symbols=symbols or [subject],
+                    context_symbol=sess.get("subject"),
+                    supplied_position=supplied_position, timeout_sec=25.0)
+                research_out["validation"] = _validate(research_out)
+                answer = _rreply.compose(research_out)
+        except Exception as e:
+            research_out = {"error": f"{type(e).__name__}: {e}"}
+
+    if research_out is None or research_out.get("error"):
+        answer = reply_mod.compose(parsed, results, subject)
     session_mod.record(sess, text, parsed, answer)
 
     trace: List[Dict[str, Any]] = []
@@ -170,6 +209,8 @@ def turn(text: str, session_id: Optional[str] = None,
             "scores": parsed.get("scores"),
         },
         "reply": answer,
+        "research": ({k: v for k, v in research_out.items()
+                      if k not in ("_ledger",)} if research_out else None),
         "policy": policy_out,
         "trace": trace,
         "elapsed_ms": int((time.time() - t0) * 1000),

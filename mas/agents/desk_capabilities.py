@@ -203,9 +203,29 @@ class Research:
                 from web.app import _build_decision_intelligence
                 d = _build_decision_intelligence(
                     request.symbol,
-                    period=request.params.get("period", "5y"))
+                    period=request.params.get("period", "5y"),
+                    position=request.params.get("position"))
+                # The research layer reads level_map and scenarios off the top
+                # level, so they are surfaced here rather than left nested —
+                # a plan that requires levels must be able to find them.
                 return ok(Research.AGENT_ID, request.capability,
-                          {"decision": d, "depth": "FULL"})
+                          {"decision": d, "depth": "FULL",
+                           "core": {
+                               "action": (d.get("_recommendation") or {}).get("action"),
+                               "composite": (d.get("_recommendation") or {}).get("composite"),
+                               "current_price": (d.get("_recommendation") or {}).get("current_price"),
+                               "volatility": {
+                                   "historical_volatility_20d":
+                                       ((d.get("risk_budget") or {}).get("volatility") or {}).get("historical_volatility_20d"),
+                                   "regime":
+                                       ((d.get("risk_budget") or {}).get("volatility") or {}).get("vol_regime"),
+                                   "annualization_days":
+                                       ((d.get("risk_budget") or {}).get("volatility") or {}).get("annualization_days"),
+                               },
+                               "levels": d.get("level_map"),
+                           },
+                           "level_map": d.get("level_map"),
+                           "scenarios": d.get("scenarios")})
             from ..core import core_read
             r = core_read(request.symbol,
                           period=request.params.get("period", "1y"))

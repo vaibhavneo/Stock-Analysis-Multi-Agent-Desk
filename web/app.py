@@ -1447,6 +1447,83 @@ _MAS_CACHE: dict = {}
 _MAS_CACHE_TTL_SEC = 180
 
 
+@app.route("/api/research", methods=["POST"])
+def research_endpoint():
+    """The research pipeline: plan -> discovery -> parallel tools ->
+    specialists -> tiered evidence -> synthesis -> validation.
+
+    Returns the STRUCTURED research result. The explanation is a separate
+    concern and a separate pass; nothing here asks a model what to think.
+    """
+    data = request.json or {}
+    question = (data.get("question") or data.get("message") or "").strip()
+    if not question:
+        return jsonify({"error": "No question"}), 400
+    if len(question) > 500:
+        return jsonify({"error": "Question too long (500 characters max)"}), 400
+
+    symbols = data.get("symbols")
+    if symbols is not None and not isinstance(symbols, list):
+        return jsonify({"error": "symbols must be a list"}), 400
+
+    position = data.get("position")
+    if position is not None and not isinstance(position, dict):
+        return jsonify({"error": "position must be an object"}), 400
+
+    depth = (data.get("depth") or "FAST").upper()
+    if depth not in ("FAST", "DEEP", "ADVERSARIAL"):
+        return jsonify({"error": "depth must be FAST, DEEP or ADVERSARIAL"}), 400
+
+    try:
+        from mas.converse.symbols import extract as _xs
+        from mas.research.orchestrator import research as _research
+        from mas.research.validate import validate as _validate
+        from mas.research import reply as _rreply
+
+        syms = symbols or _xs(question)["symbols"]
+        out = _research(question, symbols=syms, supplied_position=position,
+                        depth=depth, timeout_sec=float(data.get("timeout") or 30))
+        out["validation"] = _validate(out)
+        out["explanation"] = _rreply.compose(out)
+        out.pop("_ledger", None)
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
+@app.route("/api/research/tools")
+def research_tools_endpoint():
+    """What this deployment can actually reach — probed, not declared."""
+    try:
+        from mas.research.tools import discover
+        asset_class = (request.args.get("asset_class") or "").upper() or None
+        return jsonify(discover(asset_class))
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
+@app.route("/api/research/plan", methods=["POST"])
+def research_plan_endpoint():
+    """The plan alone, with no I/O beyond probing which tools exist. Answers
+    instantly, so the routing can be shown before anything runs."""
+    data = request.json or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "No question"}), 400
+    try:
+        from mas.converse.symbols import extract as _xs
+        from mas.asset_class import classify as _cls
+        from mas.research.plan import build_plan
+        syms = data.get("symbols") or _xs(question)["symbols"]
+        ac = _cls(syms[0])["asset_class"] if syms else "UNKNOWN"
+        plan = build_plan(question, symbols=syms, asset_class=ac,
+                          supplied_position=data.get("position"))
+        return jsonify({"plan": plan.to_dict(),
+                        "description": plan.describe()})
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
 @app.route("/api/maintenance")
 def maintenance_status():
     """What the scheduler has actually done. Reading this is how you find out

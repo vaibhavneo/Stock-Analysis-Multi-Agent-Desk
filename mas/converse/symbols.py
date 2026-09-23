@@ -99,7 +99,15 @@ def _known_tickers() -> frozenset:
 
 KNOWN_TICKERS = _known_tickers()
 
-_TICKER_RE = re.compile(r"(?<![A-Za-z0-9])\$?([A-Z]{1,5})(?![A-Za-z0-9])")
+# Single letters are excluded from the BARE-CAPITALS scan for the same reason
+# they are excluded from the lower-case one. "Should I add to my IONQ
+# position?" resolved ['I', 'IONQ'], and "I own 44 shares at $197.80. Should I
+# add?" resolved ONLY ['I'] — the pronoun, read as a ticker, analysing a
+# company nobody named. AMBIGUOUS listed IF/IN/IS/IT/ITS but not I, and the
+# guard only ran on the lower-case path. A one-letter ticker still resolves
+# when it is written with a $ or is the entire message.
+_TICKER_RE = re.compile(r"(?<![A-Za-z0-9])\$?([A-Z]{2,5})(?![A-Za-z0-9])")
+_SOLO_OR_DOLLAR_RE = re.compile(r"(?<![A-Za-z0-9])\$([A-Z])(?![A-Za-z0-9])")
 _SHAPED_RE = re.compile(
     r"(?<![A-Za-z0-9])("
     r"\^[A-Z]{1,6}"                       # ^GSPC
@@ -163,6 +171,11 @@ def extract(text: str, context_symbol: Optional[str] = None) -> Dict[str, Any]:
     # 6. Bare upper-case tokens. Ambiguous ones are refused here.
     upper_tokens = _TICKER_RE.findall(raw)
     solo = raw.strip().upper().lstrip("$")
+    # A single-letter ticker is only ever meant when it stands alone or is
+    # written with a $. Anything else is a pronoun or an article.
+    if len(solo) == 1 and solo.isalpha():
+        upper_tokens = [solo] + upper_tokens
+    upper_tokens += _SOLO_OR_DOLLAR_RE.findall(raw)
     for tok in upper_tokens:
         if tok in AMBIGUOUS and solo != tok:
             continue
