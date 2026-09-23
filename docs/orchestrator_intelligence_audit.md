@@ -34,7 +34,7 @@ that is PARTIAL, whatever is implemented.
 | 13 Cross-agent synthesis | `mas/research/synthesis.py` | 6 tests | reply, validator | **PASS** |
 | 14 Evidence hierarchy | 7 tiers, `DECISION_TIERS` | 5 tests + mutation | weighting, validator | **PASS** |
 | 15 Conflict resolution | `classify_conflict`, 7 questions | 3 tests | synthesis statement | **PASS** |
-| 16 Change detection | — | — | — | **FAIL** — not built |
+| 16 Change detection | `mas/research/change.py` + `snapshots.py` | 9 tests | research reply | **PASS** |
 | 17 Scenario engine | `decision/scenarios.py` (pre-existing) | pre-existing | brief; emitted as FORECAST evidence | **PARTIAL** — reached, not rebuilt |
 | 18 Decision engine | `decision/state.py` (pre-existing, 10 states) | pre-existing | brief | **PARTIAL** — reachable from research now; research does not yet emit its own state |
 | 19 Entry engine | `decision/entry.py` (pre-existing) | pre-existing | brief | **PARTIAL** |
@@ -66,7 +66,7 @@ that is PARTIAL, whatever is implemented.
 | 45 End-to-end | 9 cases run | — | — | **PASS** |
 | 46 Deployment | Railway | production smoke | — | **PASS** |
 
-**Totals: 22 PASS · 22 PARTIAL · 1 FAIL · 1 N/A**
+**Totals: 23 PASS · 22 PARTIAL · 0 FAIL · 1 N/A**
 
 ## The five defect classes
 
@@ -80,21 +80,18 @@ that is PARTIAL, whatever is implemented.
 
 ## Known limitations
 
-1. **Change detection (Phase 16) is not built.** Nothing compares this
-   research result with a prior snapshot. The decision journal stores briefs,
-   so the data exists to build it.
-2. **Specialists are selected but not interrogated.** The plan says which
+1. **Specialists are selected but not interrogated.** The plan says which
    capability and why; it does not yet send each one a specific research
    question, so Phase 11's "evaluate whether the recent fundamental
    deterioration changes the medium-term thesis" is not yet what a specialist
    receives.
-3. **The 5 LLM analysts still return prose**, not the structured contract of
+2. **The 5 LLM analysts still return prose**, not the structured contract of
    Phase 12. They are explicit-only and never feed a number, so this is a
    capability gap rather than a correctness one.
-4. **The research reply does not yet render the add/reduce/exit verdicts.**
+3. **The research reply does not yet render the add/reduce/exit verdicts.**
    `analyze_add` is now reached; its verdict is not yet surfaced in the
    research answer's own words.
-5. **A committed API key remains in git history.** Redacted from the working
+4. **A committed API key remains in git history.** Redacted from the working
    tree; rotation is the owner's action.
-6. **`options_chain` is unreachable** — `OPTIONSPILOT_ACCESS_CODE` unset. The
+5. **`options_chain` is unreachable** — `OPTIONSPILOT_ACCESS_CODE` unset. The
    planner reports this rather than estimating around it.

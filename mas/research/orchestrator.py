@@ -345,6 +345,20 @@ def research(question: str,
     if esc["to"] == "ADVERSARIAL":
         out["adversarial"] = _challenge(out)
 
+    # What changed since this name was last researched. The prior is read
+    # BEFORE this result is stored, or the comparison would be against itself.
+    try:
+        from .change import compare
+        from . import snapshots
+        prior = snapshots.latest(primary) if primary else None
+        out["change"] = compare(prior, out)
+        if primary:
+            snapshots.save(primary, out)
+    except Exception as e:
+        out["change"] = {"has_previous": False, "changes": [],
+                         "statement": f"Change detection was unavailable "
+                                      f"({type(e).__name__})."}
+
     out["_ledger"] = ledger
     return out
 

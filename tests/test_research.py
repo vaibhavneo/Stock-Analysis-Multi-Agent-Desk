@@ -695,6 +695,136 @@ def test_a_catalyst_outside_the_horizon_cannot_falsify_within_it():
           "outside this horizon" in f[0]["condition"], f)
 
 
+# ── Change detection ──────────────────────────────────────────────────────
+
+def _snap(items, consensus):
+    return {"evidence": {"items": items}, "synthesis": {"consensus": consensus}}
+
+
+def _it(key, src, direction, value, usable=True, freshness="FRESH"):
+    return {"key": key, "source": src, "direction": direction, "value": value,
+            "freshness": freshness, "usable_for_decision": usable,
+            "statement": f"{src} {value}"}
+
+
+def test_a_first_reading_is_not_reported_as_change():
+    from mas.research.change import compare
+    c = compare(None, _snap([_it("a", "x", "BULLISH", 1)], "AGREEMENT"))
+    check("no previous", c["has_previous"] is False)
+    check("and it says it is a first reading",
+          "first reading" in c["statement"], c["statement"])
+
+
+def test_a_direction_flip_is_reported_with_both_ends():
+    from mas.research.change import compare, IMPROVED
+    prev = _snap([_it("pillar:technical", "technical", "NEUTRAL", 50)], "MIXED")
+    cur = _snap([_it("pillar:technical", "technical", "BULLISH", 70)], "AGREEMENT")
+    c = compare(prev, cur)
+    flip = [x for x in c["changes"] if x["key"] == "pillar:technical"][0]
+    check("improved", flip["kind"] == IMPROVED, flip)
+    check("names both ends",
+          "neutral to bullish" in c["statement"], c["statement"])
+
+
+def test_noise_is_not_reported_as_change():
+    """A composite moving 61.4 -> 61.6 is noise, and reporting it would bury
+    the line that matters."""
+    from mas.research.change import compare, UNCHANGED
+    prev = _snap([_it("a", "x", "BULLISH", 61.4)], "AGREEMENT")
+    cur = _snap([_it("a", "x", "BULLISH", 61.6)], "AGREEMENT")
+    c = compare(prev, cur)
+    check("unchanged", c["changes"][0]["kind"] == UNCHANGED, c["changes"])
+    check("nothing material", c["n_material"] == 0)
+    check("and it says so", "Nothing material" in c["statement"])
+
+
+def test_a_material_move_is_reported():
+    from mas.research.change import compare, MATERIAL_MOVE, DETERIORATED
+    prev = _snap([_it("a", "x", "BULLISH", 100)], "AGREEMENT")
+    cur = _snap([_it("a", "x", "BULLISH", 100 * (1 - MATERIAL_MOVE * 2))],
+                "AGREEMENT")
+    c = compare(prev, cur)
+    check("deteriorated", c["changes"][0]["kind"] == DETERIORATED, c["changes"])
+
+
+def test_a_disappeared_source_is_a_gap_not_a_neutral_reading():
+    from mas.research.change import compare, DISAPPEARED
+    prev = _snap([_it("catalyst:next", "catalysts", "NOT_DIRECTIONAL", 62)],
+                 "AGREEMENT")
+    cur = _snap([], "INSUFFICIENT_EVIDENCE")
+    c = compare(prev, cur)
+    gone = [x for x in c["changes"] if x["kind"] == DISAPPEARED]
+    check("reported as disappeared", gone, c["changes"])
+    check("and framed as a gap", "gap rather than a neutral" in gone[0]["why"])
+
+
+def test_invalidated_is_distinct_from_deteriorated():
+    """Something that got worse is still the same claim; something
+    invalidated is no longer the claim at all."""
+    from mas.research.change import compare, INVALIDATED
+    prev = _snap([_it("a", "x", "BULLISH", 50, usable=True)], "AGREEMENT")
+    cur = _snap([_it("a", "x", "BULLISH", 50, usable=False)], "AGREEMENT")
+    c = compare(prev, cur)
+    check("invalidated", c["changes"][0]["kind"] == INVALIDATED, c["changes"])
+    check("and says it is not the same claim weakened",
+          "claim gone" in c["changes"][0]["why"], c["changes"][0])
+
+
+def test_a_consensus_move_leads_the_statement():
+    from mas.research.change import compare
+    prev = _snap([_it("a", "x", "BEARISH", 30)], "CONFLICTED")
+    cur = _snap([_it("a", "x", "BULLISH", 70)], "STRONG_AGREEMENT")
+    c = compare(prev, cur)
+    check("consensus move detected", c["consensus_moved"] is True)
+    check("and it leads", c["statement"].startswith("The overall read moved"),
+          c["statement"])
+
+
+def test_snapshots_are_append_only():
+    """A later model must not retroactively change what an earlier one said,
+    or 'what changed' compares the present against itself."""
+    import tempfile
+    from data import prediction_ledger as pl
+    from mas.research import snapshots
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    pl.set_db_path(path)
+    snapshots._applied.clear()
+    try:
+        rid = snapshots.save("TEST", _snap([_it("a", "x", "BULLISH", 1)], "AGREEMENT"))
+        check("saved", rid is not None)
+        conn = snapshots._conn()
+        try:
+            raised = False
+            try:
+                conn.execute("UPDATE research_snapshots SET consensus='X' "
+                             "WHERE id=?", (rid,))
+                conn.commit()
+            except Exception:
+                raised = True
+            check("UPDATE is refused by the database", raised)
+        finally:
+            conn.close()
+        got = snapshots.latest("TEST")
+        check("readable back", got is not None and
+              got["synthesis"]["consensus"] == "AGREEMENT", got)
+    finally:
+        os.unlink(path)
+
+
+def test_snapshot_storage_failure_does_not_break_the_answer():
+    from mas.research import snapshots
+    orig = snapshots._conn
+    snapshots._conn = lambda: (_ for _ in ()).throw(RuntimeError("db gone"))
+    try:
+        check("save returns None rather than raising",
+              snapshots.save("X", _snap([], "MIXED")) is None)
+        check("latest returns None rather than raising",
+              snapshots.latest("X") is None)
+    finally:
+        snapshots._conn = orig
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):

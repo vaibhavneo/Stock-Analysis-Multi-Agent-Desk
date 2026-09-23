@@ -96,6 +96,13 @@ def compose(result: Dict[str, Any]) -> Dict[str, Any]:
         lines.append("None of this is treated as a neutral reading.")
         blocks.append({"capability": None, "declined": True, "lines": lines})
 
+    # 4b. What moved since last time. Placed before the counter-case because
+    # a reader returning to a name wants the delta first.
+    ch = result.get("change") or {}
+    if ch.get("has_previous") and ch.get("n_material"):
+        blocks.append({"capability": None, "lines": [
+            "**What changed since last time**", ch["statement"]]})
+
     # 5. The counter-case, when the evidence was strong enough to earn one.
     adv = result.get("adversarial") or {}
     if adv.get("statement"):
