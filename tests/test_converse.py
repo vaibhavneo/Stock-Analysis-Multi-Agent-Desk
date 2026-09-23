@@ -32,7 +32,7 @@ FAIL = 0
 
 # Measured on the frozen corpus. Set AT the achieved level: a threshold below
 # what the code does is a ratchet that permits silent decay.
-MIN_ROUTING = 0.98
+MIN_ROUTING = 0.99
 MIN_SYMBOLS = 1.00
 
 
@@ -350,6 +350,28 @@ def test_a_readable_record_quotes_the_rate():
     text = " ".join(out)
     check("the rate appears", "51.5%" in text, text)
     check("with its sample size", "300" in text, text)
+
+
+def test_a_request_for_the_write_up_does_not_also_trigger_a_research_run():
+    """'give me the full written analysis' asks for the WRITE-UP. The bare
+    'analysis' keyword was dragging a deterministic research run in beside
+    it — two different jobs from one phrase."""
+    r = parse("give me the full written analysis on META")
+    check("narrative only", r["capabilities"] == ["analyst_narrative"],
+          r["capabilities"])
+    check("and the symbol resolved", r["symbols"] == ["META"], r["symbols"])
+    plain = parse("give me the analysis on META")
+    check("a plain analysis request still routes to research",
+          "equity_research" in plain["capabilities"], plain["capabilities"])
+
+
+def test_the_written_reasoning_is_never_confused_with_the_interpretive_layer():
+    check("reasoning -> narrative",
+          parse("explain your reasoning on NVDA")["capabilities"]
+          == ["analyst_narrative"])
+    check("context -> intelligence",
+          parse("historical context on NVDA")["capabilities"]
+          == ["market_intelligence"])
 
 
 if __name__ == "__main__":

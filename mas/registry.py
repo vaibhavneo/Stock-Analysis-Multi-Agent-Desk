@@ -28,6 +28,8 @@ CAPABILITIES = (
     "market_regime",          # what kind of market is this
     "event_calendar",         # scheduled things that could move it
     "portfolio_review",       # weights, concentration, what to do
+    "market_intelligence",    # the interpretive layer over the primitives
+    "analyst_narrative",      # the five LLM analysts; PROSE ONLY, never a number
 )
 
 

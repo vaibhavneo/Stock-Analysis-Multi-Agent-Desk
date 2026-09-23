@@ -1,6 +1,6 @@
 {
   "_comment": "The sub-agent roster. Agents are DATA, not code \u2014 the same seam financial_data/registry.json draws for providers. Adding a specialist means adding an entry plus a module implementing mas/contract.py; the planner, the executor and the UI change not at all. `writes` is the field to read first: it names every side effect an agent can cause on another service, because a capability that mutates someone else's journal must never be reachable by the same automatic path as a read. `symbol_required: false` marks an agent that answers about the DESK or the MARKET rather than about a name \u2014 those stay eligible when the user asks 'how's the market' or 'what's your hit rate', where filtering by the asset class of a symbol that was never given would silently drop every one of them. `est_ms` is a MEASURED typical latency, used by mas/policy.py to spend a latency budget on the capabilities that add the most information. It is a planning input, never a timeout \u2014 timeouts stay per-agent in `timeout_sec`.",
-  "version": 3,
+  "version": 4,
   "agents": {
     "options_pilot": {
       "id": "options_pilot",
@@ -252,6 +252,57 @@
       "notes": "Declines rather than assuming when no holdings are supplied. A portfolio review built on inferred positions would be advice about a portfolio nobody owns.",
       "symbol_required": false,
       "est_ms": 4000
+    },
+    "analysts": {
+      "id": "analysts",
+      "name": "The five analyst agents",
+      "role": "Fundamentals, Technical, Social, Algo and Prediction \u2014 written reasoning",
+      "module": "mas.agents.analysts",
+      "transport": "local",
+      "capabilities": [
+        "analyst_narrative"
+      ],
+      "asset_classes": [
+        "EQUITY"
+      ],
+      "universe": "UNBOUNDED",
+      "price_basis": null,
+      "priority": 90,
+      "reliability": 0.5,
+      "timeout_sec": 420,
+      "requires_key": "DEEPSEEK_API_KEY",
+      "est_ms": 120000,
+      "symbol_required": true,
+      "writes": {},
+      "notes": "PROSE ONLY, and never implied. No number in any decision field comes from these agents \u2014 the verdict, levels and sizing are deterministic and identical whether or not this ran. Priority 90 and est_ms 120000 keep it out of every budgeted path; it runs when a user asks for the written reasoning and not otherwise."
+    },
+    "intelligence": {
+      "id": "intelligence",
+      "name": "Intelligence layer",
+      "role": "Historical context, regime, risk and forecast, interpreted",
+      "module": "mas.agents.intelligence",
+      "transport": "local",
+      "capabilities": [
+        "market_intelligence"
+      ],
+      "asset_classes": [
+        "EQUITY",
+        "ETF",
+        "INDEX",
+        "CRYPTO",
+        "FX",
+        "COMMODITY"
+      ],
+      "universe": "UNBOUNDED",
+      "price_basis": "PRICE_HISTORY_DERIVED",
+      "priority": 18,
+      "reliability": 0.75,
+      "timeout_sec": 180,
+      "requires_key": null,
+      "est_ms": 3200,
+      "symbol_required": true,
+      "writes": {},
+      "notes": "Sits BELOW the orchestrator and ABOVE the raw specialists: it interprets what they return rather than fetching anything itself. intelligence/orchestration.py already spends compute only where it adds information; registering it makes that layer reachable by name instead of behind one endpoint."
     }
   }
 }

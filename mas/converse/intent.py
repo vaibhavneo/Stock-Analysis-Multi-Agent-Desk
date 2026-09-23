@@ -40,9 +40,11 @@ REGIME = "market_regime"
 EVENTS = "event_calendar"
 PORTFOLIO = "portfolio_review"
 BENCHMARK = "benchmark_relation"
+INTEL = "market_intelligence"
+NARRATIVE = "analyst_narrative"
 
 ALL_CAPABILITIES = (RESEARCH, OPTIONS, BACKTEST, RECORD, REGIME, EVENTS,
-                    PORTFOLIO, BENCHMARK)
+                    PORTFOLIO, BENCHMARK, INTEL, NARRATIVE)
 
 # Capabilities that stand on their own — they answer about the DESK or the
 # MARKET, so they need no symbol.
@@ -133,6 +135,21 @@ PATTERNS: List[Tuple[str, str, float]] = [
     (r"\bdriven\s+by\b", BENCHMARK, 1.2),
     (r"\btracks?\s+the\s+(market|index|s&p)\b", BENCHMARK, 1.4),
 
+    # ── The five analysts' written reasoning ──────────────────────────────
+    (r"\bexplain\s+(your|the|its)\s+(reasoning|thinking|logic|case)\b", NARRATIVE, 1.6),
+    (r"\byour\s+analysts?\b|\bwhat\s+do\s+(your|the)\s+analysts?\s+say\b",
+     NARRATIVE, 1.6),
+    (r"\bwrite\s+(it|this|that)\s+up\b", NARRATIVE, 1.6),
+    (r"\bwritten\s+(analysis|reasoning|explanation|write[\s-]?up)\b", NARRATIVE, 1.6),
+    (r"\bfull\s+write[\s-]?up\b", NARRATIVE, 1.6),
+
+    # ── The interpretive layer ────────────────────────────────────────────
+    (r"\bhistorical\s+context\b", INTEL, 1.6),
+    (r"\bsimilar\s+setups?\b|\bsetups?\s+like\s+this\b", INTEL, 1.6),
+    (r"\bbehaved?\b.{0,24}\bbefore\b", INTEL, 1.5),
+    (r"\banalogs?\b|\banalogues?\b", INTEL, 1.5),
+    (r"\blast\s+time\s+(this|it)\b", INTEL, 1.4),
+
     # ── Research, asked explicitly ────────────────────────────────────────
     (r"\banal(yse|yze|ysis)\b", RESEARCH, 1.4),
     (r"\bshould\s+i\s+(buy|sell|add|get\s+out|own)\b", RESEARCH, 1.4),
@@ -175,6 +192,11 @@ NO_SUBJECT = re.compile(
 # object of the verb: "what puts should i buy on tesla" asks for puts, not for
 # an equity brief. Without this the verb dragged a full research run into
 # every options request.
+_WRITTEN_ANALYSIS = re.compile(
+    r"\b(written|full)\s+(written\s+)?(analysis|write[\s-]?up|explanation)\b",
+    re.I)
+_ANALYSIS_RESEARCH = r"\banal(yse|yze|ysis)\b"
+
 _OPTION_OBJECT_FIRST = re.compile(
     r"\b(calls?|puts?|options?|spreads?|premium|strikes?)\b[^.?!]{0,40}?"
     r"\bshould\s+i\s+(buy|sell|own|add)\b", re.I)
@@ -184,8 +206,11 @@ _BUY_VERB_RESEARCH = r"\bshould\s+i\s+(buy|sell|add|get\s+out|own)\b"
 def _score(text: str) -> Dict[str, float]:
     scores: Dict[str, float] = {}
     suppress_buy_verb = bool(_OPTION_OBJECT_FIRST.search(text))
+    suppress_analysis = bool(_WRITTEN_ANALYSIS.search(text))
     for pat, cap, w in PATTERNS:
         if suppress_buy_verb and pat == _BUY_VERB_RESEARCH:
+            continue
+        if suppress_analysis and pat == _ANALYSIS_RESEARCH:
             continue
         if re.search(pat, text, re.I):
             scores[cap] = scores.get(cap, 0.0) + w

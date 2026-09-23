@@ -246,7 +246,47 @@ def _say_benchmark(d: Dict[str, Any], symbol: str) -> List[str]:
     return lines
 
 
+def _say_narrative(d: Dict[str, Any], symbol: str) -> List[str]:
+    agents = d.get("agents") or {}
+    if not agents:
+        return [f"The analyst pass returned nothing for {symbol}."]
+    names = {"fundamentals_analysis": "Fundamentals", "technical_analysis": "Technical",
+             "social_analysis": "Social", "algo_analysis": "Algo",
+             "prediction": "Prediction"}
+    lines = [f"**The five analysts on {symbol}** "
+             f"({d.get('elapsed_sec', '?')}s):"]
+    for key, label in names.items():
+        text = agents.get(key)
+        if not text:
+            continue
+        body = text if isinstance(text, str) else str(text)
+        lines.append(f"- **{label}** — {body.strip()[:400]}")
+    lines.extend(d.get("honesty") or [])
+    return lines
+
+
+def _say_intel(d: Dict[str, Any], symbol: str) -> List[str]:
+    lines = [f"**Context on {symbol}** — "
+             f"{', '.join(d.get('sections_run') or []) or 'no sections'}."]
+    hc = d.get("historical_context") or d.get("historical") or {}
+    if isinstance(hc, dict) and hc.get("summary"):
+        lines.append(str(hc["summary"])[:320])
+    rg = d.get("regime") or d.get("market_regime") or {}
+    if isinstance(rg, dict) and rg.get("trend"):
+        lines.append(f"Market regime: {str(rg.get('trend')).lower()}, "
+                     f"{str(rg.get('risk_stance', '')).replace('_', '-').lower()}.")
+    fc = d.get("forecast") or {}
+    if isinstance(fc, dict) and fc.get("summary"):
+        lines.append(str(fc["summary"])[:320])
+    if len(lines) == 1:
+        lines.append("The sections ran but carried no readable summary — the "
+                     "full object is in the trace rather than paraphrased here.")
+    return lines
+
+
 COMPOSERS = {
+    "market_intelligence": _say_intel,
+    "analyst_narrative": _say_narrative,
     "equity_research": _say_research,
     "option_structures": _say_options,
     "strategy_backtest": _say_backtest,
@@ -272,6 +312,9 @@ ROSTER_BLURB = [
     "- **Your portfolio** — weights, concentration, what to trim.",
     "- **What is it really tracking** — beta and correlation to the benchmark "
     "that actually drives it.",
+    "- **Context** — how this name has behaved in setups like the current one.",
+    "- **The written reasoning** — the five analyst agents, in prose. Ask for "
+    "it by name; it is slow and it never changes a number.",
     "I cannot place orders, and I will not pick a stock for you out of "
     "nowhere — name one and I'll do the work.",
 ]

@@ -39,6 +39,8 @@ REGIME = "market_regime"
 EVENTS = "event_calendar"
 PORTFOLIO = "portfolio_review"
 BENCHMARK = "benchmark_relation"
+INTEL = "market_intelligence"
+NARRATIVE = "analyst_narrative"
 
 CASES: List[Dict[str, Any]] = [
     # ── Plain research, ticker given ──────────────────────────────────────
@@ -151,6 +153,20 @@ CASES: List[Dict[str, Any]] = [
      "symbols": ["TSLA"]},
     {"q": "am i just buying the s&p again if i buy QQQ", "caps": [BENCHMARK],
      "symbols": ["QQQ"]},
+
+    # ── The interpretive layer, and the written reasoning ─────────────────
+    # Added when the five analyst agents and intelligence/ joined the roster.
+    # Written before the matcher patterns for them existed, same as the rest.
+    {"q": "explain your reasoning on NVDA", "caps": [NARRATIVE], "symbols": ["NVDA"]},
+    {"q": "what do your analysts say about AAPL", "caps": [NARRATIVE], "symbols": ["AAPL"]},
+    {"q": "write it up properly for tesla", "caps": [NARRATIVE], "symbols": ["TSLA"]},
+    {"q": "give me the full written analysis on META", "caps": [NARRATIVE],
+     "symbols": ["META"]},
+    {"q": "how has AAPL behaved in setups like this before", "caps": [INTEL],
+     "symbols": ["AAPL"]},
+    {"q": "historical context on NVDA", "caps": [INTEL], "symbols": ["NVDA"]},
+    {"q": "find me similar setups to TSLA in its history", "caps": [INTEL],
+     "symbols": ["TSLA"]},
 
     # ── Follow-ups: the symbol lives in the conversation, not the sentence ─
     {"q": "what about microsoft", "caps": [RESEARCH], "symbols": ["MSFT"],

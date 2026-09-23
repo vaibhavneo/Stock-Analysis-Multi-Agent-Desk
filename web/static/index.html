@@ -2304,6 +2304,47 @@ function diBear(key) {
   </div>`;
 }
 
+// "Price now" used to show the settled daily close, so on any day whose
+// session had closed but not yet published, the headline price was a day
+// behind and labelled current. The tile now shows the last trade when one is
+// available, with the price the analysis was actually computed on beneath it
+// — the two are different numbers and conflating them is what caused the bug.
+function _diPriceTile(d) {
+  const f = d.freshness || {};
+  const q = f.quote || {};
+  const basis = (f.computed_on || {}).price;
+  if (!q.available || basis == null) {
+    return `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Last close used</div>
+      <div style="font-size:13px;color:var(--text);font-weight:700;font-variant-numeric:tabular-nums">${esc((d.plain || {}).price || '')}</div></div>`;
+  }
+  const drift = f.drift_pct;
+  const col = drift == null ? 'var(--muted)' : (drift >= 0 ? 'var(--green)' : 'var(--red)');
+  return `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Last trade</div>
+    <div style="font-size:13px;color:var(--text);font-weight:700;font-variant-numeric:tabular-nums">$${num(q.price)}
+      ${drift != null ? `<span style="font-size:11px;color:${col};font-weight:600">${drift >= 0 ? '+' : ''}${num(drift, 2)}%</span>` : ''}</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:2px">computed on $${num(basis)}${(f.computed_on || {}).date ? ' · ' + esc(f.computed_on.date) : ''}</div></div>`;
+}
+
+// A level crossed since the close is the one piece of real-time information
+// that changes what to do, so it never collapses into a disclosure.
+function _diFreshnessLine(d) {
+  const f = d.freshness || {};
+  if (!f.statement) return '';
+  const crossed = (f.crossed || []).length > 0;
+  const sess = (f.session || {}).state;
+  const live = sess === 'OPEN' || sess === 'PRE_MARKET' || sess === 'AFTER_HOURS';
+  // The tile already shows the price, the drift and the basis. Repeating it
+  // in prose underneath adds nothing — so this line appears only when it has
+  // something the tile does not: a level crossed, a move big enough to
+  // re-run, or a session still moving.
+  if (!crossed && !f.stale && !live) return '';
+  const col = crossed ? 'var(--yellow)' : 'var(--muted)';
+  const text = crossed ? f.statement
+    : (live ? ((f.session || {}).statement || '') + ' ' + f.statement : f.statement);
+  return `<div style="font-size:11px;color:${col};margin-top:5px;line-height:1.55${crossed ? ';padding:7px 10px;background:rgba(255,234,0,.07);border:1px solid var(--yellow);border-radius:7px' : ''}">
+    ${crossed ? '<b>Moved past a level since this was computed —</b> ' : ''}${esc(text.trim())}</div>`;
+}
+
 function diDetails(title, subtitle, bodyHtml, open, bearKey) {
   return `<details ${open ? 'open' : ''} style="margin:8px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
     <summary style="cursor:pointer;padding:9px 12px;font-size:12px;color:var(--text);list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px">
@@ -2422,12 +2463,12 @@ function _paintDecisionIntelligence(d) {
         <div style="font-size:13px;color:var(--text);font-weight:700">${esc((P.call || {}).if_you_own_it || '')}</div></div>
       <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">If you don't</div>
         <div style="font-size:13px;color:var(--text);font-weight:700">${esc((P.call || {}).if_you_dont || '')}</div></div>
-      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Price now</div>
-        <div style="font-size:13px;color:var(--text);font-weight:700;font-variant-numeric:tabular-nums">${esc(P.price || '')}</div></div>
+      ${_diPriceTile(d)}
       <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">How much</div>
         <div style="font-size:13px;color:${d.sizing.gated ? 'var(--red)' : 'var(--green)'};font-weight:700">${d.sizing.gated ? 'Nothing yet — see the caution below' : num(d.sizing.position_size_pct, 1) + '% of the risk budget'}</div></div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-top:9px">${esc((P.call || {}).ownership_note || '')}</div>
+    ${_diFreshnessLine(d)}
   </div>`;
 
   // Consistency errors stay above the fold. A contradiction the reader has to

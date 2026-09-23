@@ -1137,6 +1137,48 @@ def _build_decision_intelligence(ticker: str, period: str = "5y", deep: bool = F
             "no_execution": "Nothing in this system can place an order.",
         }
 
+    # ── Freshness: how old is the price this was computed on? ─────────────
+    # The brief showed "PRICE NOW" against a settled daily bar, so on any day
+    # whose session had closed but not yet published, the headline price and
+    # every distance derived from it were a day behind and labelled current.
+    # The analysis itself stays on the settled series — swapping in a live
+    # tick would mean the levels shown were derived from a different number
+    # than the one beside them — but the drift, and anything it has CROSSED,
+    # is now reported.
+    try:
+        from mas.freshness import build_freshness
+        from mas.asset_class import classify as _fclassify
+
+        _levels = []
+        _rb = decision.get("risk_budget") or {}
+        if _rb.get("invalidation_level") is not None:
+            _levels.append({"label": "the invalidation",
+                            "price": _rb["invalidation_level"]})
+        _ep = decision.get("entry_plan") or {}
+        for _k, _lbl in (("buy_zone_low", "the entry area"),
+                         ("trigger_price", "the entry trigger")):
+            if isinstance(_ep.get(_k), (int, float)):
+                _levels.append({"label": _lbl, "price": _ep[_k]})
+        _lm = decision.get("level_map") or {}
+        for _k, _lbl in (("nearest_support", "the nearest support"),
+                         ("nearest_resistance", "the nearest resistance")):
+            _v = _lm.get(_k)
+            _p = _v.get("price") if isinstance(_v, dict) else _v
+            if isinstance(_p, (int, float)):
+                _levels.append({"label": _lbl, "price": _p})
+
+        decision["freshness"] = build_freshness(
+            ticker,
+            _fclassify(ticker, fund)["asset_class"],
+            computed_on_price=rec.get("current_price"),
+            computed_on_date=(rec.get("data_asof")
+                              or (str(df.index[-1])[:10] if len(df) else None)),
+            levels=_levels)
+    except Exception as e:
+        decision["freshness"] = {
+            "statement": f"Freshness could not be established ({type(e).__name__}).",
+            "quote": {"available": False}, "crossed": [], "stale": False}
+
     # Journal every generated decision. Append-only and content-addressed, so
     # repeated views of the same page do not create duplicate rows.
     try:

@@ -217,3 +217,133 @@ class Research:
                       price_basis="PRICE_HISTORY_DERIVED")
         except Exception as e:
             return error(Research.AGENT_ID, request.capability, e)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# The five LLM analysts — the sub-agents the product is named for
+# ══════════════════════════════════════════════════════════════════════════
+class Analysts:
+    """Fundamentals, Technical, Social, Algo and Prediction, as one capability.
+
+    WHY EXPLICIT-ONLY
+    -----------------
+    These are the five agents on the tabs, and until now they lived entirely
+    outside the roster: reachable from one streaming endpoint and invisible to
+    the orchestrator. Registering them makes the layering real — the
+    orchestrator can now ask for a narrative the same way it asks for options.
+
+    But they are declared `symbol_required` and never implied, for reasons
+    that are not preferences:
+
+      - they need DEEPSEEK_API_KEY, and the rest of this desk is keyless
+      - `agents/stock_agents.py` runs them at a 180-second client timeout
+        because the model reasons before answering, so a full pass is minutes
+      - their output is PROSE. No number in any decision field comes from
+        them, and none ever should: the verdict, the levels and the sizing are
+        deterministic, and an LLM that could move them would make the engine
+        unreproducible.
+
+    So this capability adds explanation on request. It never adds a number.
+    """
+    AGENT_ID = "analysts"
+
+    @staticmethod
+    def available(symbol: str, asset_class: str) -> Tuple[bool, str]:
+        import os
+        if not (os.environ.get("DEEPSEEK_API_KEY")
+                or os.environ.get("ANTHROPIC_API_KEY")):
+            return False, ("the five analyst agents need DEEPSEEK_API_KEY in "
+                           "this service's environment. Every number in the "
+                           "brief is computed without them; what is missing "
+                           "is the written reasoning, not the decision.")
+        spec = spec_for(asset_class)
+        if spec.asset_class in ("UNKNOWN",):
+            return False, "the symbol could not be classified"
+        if not spec.has_fundamentals:
+            return False, (f"the analyst pass reads issuer financials, "
+                           f"earnings and analyst coverage, none of which "
+                           f"exist for a {spec.label}")
+        return True, ""
+
+    @staticmethod
+    def run(request: AgentRequest) -> AgentResult:
+        ready, why = Analysts.available(request.symbol, request.asset_class)
+        if not ready:
+            return unavailable(Analysts.AGENT_ID, request.capability, why)
+        try:
+            import os
+            from agents.orchestrator import analyze_stock
+            res = analyze_stock(
+                request.symbol,
+                api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                verbose=False)
+            if res.get("error"):
+                return unavailable(Analysts.AGENT_ID, request.capability,
+                                   str(res["error"]))
+            return ok(Analysts.AGENT_ID, request.capability,
+                      {"symbol": request.symbol,
+                       "agents": {k: v for k, v in res.items()
+                                  if k in ("fundamentals_analysis",
+                                           "technical_analysis",
+                                           "social_analysis",
+                                           "algo_analysis",
+                                           "prediction")},
+                       "elapsed_sec": res.get("elapsed_sec"),
+                       "honesty": [
+                           "Prose only. No number in any decision field comes "
+                           "from these agents — the verdict, the levels and "
+                           "the sizing are computed deterministically and are "
+                           "identical whether or not this ran."]},
+                      price_basis=None, service="deepseek")
+        except Exception as e:
+            return error(Analysts.AGENT_ID, request.capability, e)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# The intelligence layer — between the orchestrator and the raw specialists
+# ══════════════════════════════════════════════════════════════════════════
+class Intelligence:
+    """Historical context, regime, risk, forecast and evidence synthesis.
+
+    `intelligence/orchestration.py` already spends compute where it adds
+    information, choosing which sections to run for a given question. That
+    made it a layer in everything but reachability: it sat behind one endpoint
+    and nothing above it could ask for it by name.
+
+    Registering it puts it where it belongs — below the orchestrator, above
+    the raw data specialists — so a request can be answered with the
+    interpretive layer rather than only the primitives underneath it.
+    """
+    AGENT_ID = "intelligence"
+
+    SECTIONS = ("historical", "regime", "risk", "forecast")
+
+    @staticmethod
+    def available(symbol: str, asset_class: str) -> Tuple[bool, str]:
+        if spec_for(asset_class).asset_class == "UNKNOWN":
+            return False, "the symbol could not be classified"
+        return True, ""
+
+    @staticmethod
+    def run(request: AgentRequest) -> AgentResult:
+        if not request.symbol:
+            return unavailable(Intelligence.AGENT_ID, request.capability,
+                               "the intelligence layer needs a symbol")
+        try:
+            from intelligence.orchestration import run_selected, plan_sections
+            sections = request.params.get("sections") or plan_sections("full")
+            res = run_selected(
+                request.symbol, sections,
+                avg_cost=request.params.get("avg_cost"),
+                shares=request.params.get("shares"))
+            if not res or res.get("error"):
+                return unavailable(
+                    Intelligence.AGENT_ID, request.capability,
+                    str((res or {}).get("error")
+                        or "the intelligence layer returned nothing"))
+            return ok(Intelligence.AGENT_ID, request.capability,
+                      {"symbol": request.symbol, "sections_run": sections,
+                       **{k: v for k, v in res.items() if k != "error"}},
+                      price_basis="PRICE_HISTORY_DERIVED")
+        except Exception as e:
+            return error(Intelligence.AGENT_ID, request.capability, e)
