@@ -1501,6 +1501,141 @@ def research_endpoint():
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 
+@app.route("/api/research/stream", methods=["POST"])
+def research_stream_endpoint():
+    """Server-sent progress for one research request.
+
+    The previous production timeout proved that multi-agent research cannot
+    block a UI silently: research that takes seconds with no signal is
+    indistinguishable from research that has hung. Each stage is emitted as it
+    completes, and the final event carries the structured result.
+
+    No credential, prompt or raw tool output is emitted — only stage names,
+    outcomes and timings.
+    """
+    data = request.json or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "No question"}), 400
+    if len(question) > 500:
+        return jsonify({"error": "Question too long (500 characters max)"}), 400
+    symbols = data.get("symbols")
+    if symbols is not None and not isinstance(symbols, list):
+        return jsonify({"error": "symbols must be a list"}), 400
+    position = data.get("position")
+    if position is not None and not isinstance(position, dict):
+        return jsonify({"error": "position must be an object"}), 400
+
+    import queue as _queue
+    import threading as _threading
+
+    def generate():
+        q: "_queue.Queue" = _queue.Queue()
+        box = {}
+
+        def on_progress(stage, detail):
+            q.put({"stage": stage, **{k: v for k, v in (detail or {}).items()
+                                      if k not in ("payload", "data")}})
+
+        def work():
+            try:
+                from mas.converse.symbols import extract as _xs
+                from mas.research.orchestrator import research as _research
+                from mas.research.validate import validate as _validate
+                from mas.research.explain import explain as _explain
+                syms = symbols or _xs(question)["symbols"]
+                out = _research(question, symbols=syms,
+                                supplied_position=position,
+                                timeout_sec=float(data.get("timeout") or 30),
+                                on_progress=on_progress)
+                out["validation"] = _validate(out)
+                out["explanation"] = _explain(out,
+                                              use_llm=bool(data.get("explain_with_llm")))
+                out.pop("_ledger", None)
+                box["result"] = out
+            except Exception as e:
+                box["error"] = f"{type(e).__name__}: {e}"
+            finally:
+                q.put(None)
+
+        th = _threading.Thread(target=work, daemon=True)
+        th.start()
+        yield "event: open\ndata: {}\n\n"
+        while True:
+            item = q.get()
+            if item is None:
+                break
+            yield f"event: progress\ndata: {json.dumps(item, default=str)}\n\n"
+        if "error" in box:
+            yield f"event: error\ndata: {json.dumps({'error': box['error']})}\n\n"
+        else:
+            yield f"event: result\ndata: {json.dumps(box.get('result', {}), default=str)}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/research/why", methods=["POST"])
+def research_why_endpoint():
+    """Walk one claim back to its source.
+
+    FINAL -> SYNTHESIS -> EVIDENCE -> CAPABILITY -> TOOL -> SOURCE -> TIMESTAMP.
+    A claim that cannot be walked back is one nobody can check.
+    """
+    data = request.json or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "No question"}), 400
+    try:
+        from mas.converse.symbols import extract as _xs
+        from mas.research.orchestrator import research as _research
+        from mas.research.provenance import why as _why, build_graph
+        syms = data.get("symbols") or _xs(question)["symbols"]
+        out = _research(question, symbols=syms,
+                        supplied_position=data.get("position"))
+        out.pop("_ledger", None)
+        return jsonify({"why": _why(out, data.get("claim")),
+                        "graph": build_graph(out)})
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
+@app.route("/api/research/journal")
+def research_journal_endpoint():
+    """The frozen research record. Append-only by database trigger."""
+    symbol = (request.args.get("symbol") or "").upper().strip()
+    fingerprint = request.args.get("id")
+    try:
+        from mas.research import journal as _rj
+        if fingerprint:
+            rec = _rj.get(fingerprint)
+            return (jsonify(rec) if rec else
+                    (jsonify({"error": "no such record"}), 404))
+        if not symbol:
+            return jsonify({"error": "pass ?symbol=NVDA or ?id=<fingerprint>"}), 400
+        return jsonify({"symbol": symbol,
+                        "records": _rj.history(symbol,
+                                               limit=int(request.args.get("limit", 20)))})
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
+@app.route("/api/research/value")
+def research_value_endpoint():
+    """What each capability has actually contributed, accumulated over time.
+
+    A tool called often that never changes a reading is worth looking at —
+    but that is a claim about a distribution, and nothing here is removed on
+    the strength of it.
+    """
+    try:
+        from mas.research.toolvalue import report
+        return jsonify(report())
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+
 @app.route("/api/research/tools")
 def research_tools_endpoint():
     """What this deployment can actually reach — probed, not declared."""

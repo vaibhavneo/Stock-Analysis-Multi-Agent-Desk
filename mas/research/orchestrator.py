@@ -26,6 +26,7 @@ from . import tools as T
 from .evidence import (Item, Ledger, FACT, OBSERVATION, MODEL_OUTPUT,
                        HISTORICAL_STATISTIC, FORECAST, INTERPRETATION,
                        FRESH, AGEING, STALE, UNKNOWN_FRESHNESS)
+from .budget import Accounting, BARS
 from .execute import execute
 from .plan import build_plan, FAST, DEEP
 from .position import to_engine as position_to_engine
@@ -264,17 +265,35 @@ def research(question: str,
              supplied_position: Optional[Dict[str, Any]] = None,
              depth: str = FAST,
              runner=None,
-             timeout_sec: float = 30.0) -> Dict[str, Any]:
-    """One research request, end to end. Never raises."""
+             timeout_sec: float = 30.0,
+             on_progress=None) -> Dict[str, Any]:
+    """One research request, end to end. Never raises.
+
+    `on_progress(stage, detail)` is called as each stage completes. Research
+    that blocks a UI for seconds with no signal is indistinguishable from
+    research that has hung — the previous production timeout proved that.
+    """
     t0 = time.time()
+
+    def _emit(stage, **detail):
+        if on_progress:
+            try:
+                on_progress(stage, detail)
+            except Exception:
+                pass
     syms = [s.upper() for s in (symbols or [])]
     primary = syms[0] if syms else (context_symbol or "")
     cls = classify_symbol(primary) if primary else {"asset_class": "UNKNOWN"}
     asset_class = cls.get("asset_class", "UNKNOWN")
 
+    _emit("planning", question=question, symbols=syms,
+          asset_class=asset_class)
     plan = build_plan(question, symbols=syms, asset_class=asset_class,
                       context_symbol=context_symbol,
                       supplied_position=supplied_position, depth=depth)
+    _emit("planned", intent=plan.intent, answerable=plan.answerable,
+          required=plan.required_evidence,
+          capabilities=[c["capability"] for c in plan.capabilities])
 
     out: Dict[str, Any] = {
         "question": question, "plan": plan.to_dict(),
@@ -292,7 +311,11 @@ def research(question: str,
     if runner is None:
         runner = _default_runner(primary, asset_class, plan)
 
-    ex = execute(plan, runner, timeout_sec=timeout_sec)
+    acct = Accounting(budget_ms=plan.budget_ms)
+    ex = execute(plan, runner, timeout_sec=timeout_sec, on_progress=on_progress)
+    for cap, step in (ex["steps"] or {}).items():
+        acct.record(cap, llm=(cap == "analyst_narrative"),
+                    external=(cap != "forward_record"))
     ledger = Ledger()
     horizon = (plan.horizon or {}).get("horizon", "ALL")
 
@@ -311,7 +334,11 @@ def research(question: str,
             ledger.add(it)
         step.records = len(produced)
 
+    _emit("evidence", n_items=len(ledger.items),
+          n_usable=len(ledger.decision_usable()))
     syn = synthesize(ledger, horizon=horizon)
+    _emit("synthesis", consensus=syn.get("consensus"),
+          sources=syn.get("n_directional_sources"))
 
     # Consumption is recorded on the STEP, so tool value can be measured
     # later: a capability that produced evidence nothing used is visible.
@@ -335,6 +362,11 @@ def research(question: str,
                   "summary": ex["trace"].summary()},
         "elapsed_ms": int((time.time() - t0) * 1000),
     })
+    acct.elapsed_ms = out["elapsed_ms"]
+    acct.cache_hits = BARS.hits
+    acct.cache_misses = BARS.misses
+    out["accounting"] = acct.to_dict()
+    out["cache"] = BARS.stats()
     # The decision engine's own fields, selected by what was asked. It
     # produced a state, an add verdict, an entry plan, invalidation triggers
     # and a monitoring schedule all along; the research answer reached them
@@ -347,6 +379,9 @@ def research(question: str,
             decision_obj = step.data.get("decision")
             break
     out["decision"] = _build_decision(decision_obj, plan.intent)
+    # Kept for the brief, which builds the full section set from it.
+    out["_decision_object"] = decision_obj
+    _emit("decision", n_sections=(out["decision"] or {}).get("n_produced"))
 
     # Change detection runs BEFORE the contract check, because
     # `changed_since_previous` is a contract field and stamping it afterwards
@@ -427,6 +462,33 @@ def research(question: str,
     if esc["to"] == "ADVERSARIAL":
         out["adversarial"] = _challenge(out)
 
+    # Freeze the research itself, not only the brief it produced. Without
+    # this a decision can be re-read later with no way to reconstruct which
+    # plan was made, which tools were reachable, or what was missing.
+    try:
+        from .journal import journal as _journal_research
+        out["journal_id"] = _journal_research(out)
+    except Exception:
+        out["journal_id"] = None
+
+    # Accumulate what each capability contributed, so "is this tool worth its
+    # latency" becomes a question about a distribution rather than a hunch.
+    try:
+        from .toolvalue import record as _record_value
+        _record_value(out)
+    except Exception:
+        pass
+
+    try:
+        from .brief import build as _build_brief
+        out["brief"] = _build_brief(out)
+    except Exception as e:
+        out["brief"] = {"sections": [],
+                        "statement": f"The brief could not be assembled "
+                                     f"({type(e).__name__})."}
+
+    _emit("done", elapsed_ms=out.get("elapsed_ms"))
+    out.pop("_decision_object", None)
     out["_ledger"] = ledger
     return out
 

@@ -26,47 +26,49 @@ that is PARTIAL, whatever is implemented.
 | 5 Intent classes | `mas/research/intent.py`, 17 classes | corpus 73, 100% | plan spec lookup | **PASS** |
 | 6 Position context | `mas/research/position.py` | 6 tests | passed to decision engine | **PASS** |
 | 7 Freshness orchestration | `mas/freshness.py` + tool `freshness` field | `test_freshness.py` | brief price tile | **PASS** |
-| 8 Tool-selection policy | `plan.build_plan` tool loop | 2 tests | execution | **PARTIAL** — selects by reliability and reachability; does not yet trade latency against value |
+| 8 Tool-selection policy | `budget.tool_value` — value per second of latency | 3 tests | plan tool loop | **PASS** |
 | 9 Parallel execution | `execute.run_stage` | timing test (4×0.4s → 0.41s) | trace | **PASS** |
-| 10 Budgeted research | `Trace.over_budget`, per-depth budgets | 1 test | optional-step skip | **PARTIAL** — budget skips optional steps; no token/LLM-call accounting |
-| 11 Specialist delegation | `plan.capabilities` derived from evidence | 2 tests | executor | **PARTIAL** — chooses WHICH and WHY; does not yet send a per-specialist question |
-| 12 Specialist output contract | `evidence.Item` (14 fields) | 5 tests | synthesis | **PARTIAL** — the contract exists and adapters are normalised into it; the 5 LLM analysts still return prose |
+| 10 Budgeted research | `budget.Accounting` — tool/LLM/API/token/cache counts | 2 tests | `/api/research` | **PASS** |
+| 11 Specialist delegation | `delegation.brief_for` — question, receives, expects | 2 tests | runner params | **PASS** |
+| 12 Specialist output contract | `Item.contract()`, 9 fields, 4/4 compliant | 3 tests | synthesis | **PASS** |
 | 13 Cross-agent synthesis | `mas/research/synthesis.py` | 6 tests | reply, validator | **PASS** |
 | 14 Evidence hierarchy | 7 tiers, `DECISION_TIERS` | 5 tests + mutation | weighting, validator | **PASS** |
 | 15 Conflict resolution | `classify_conflict`, 7 questions | 3 tests | synthesis statement | **PASS** |
 | 16 Change detection | `mas/research/change.py` + `snapshots.py` | 9 tests | research reply | **PASS** |
-| 17 Scenario engine | `decision/scenarios.py` (pre-existing) | pre-existing | brief; emitted as FORECAST evidence | **PARTIAL** — reached, not rebuilt |
-| 18 Decision engine | `decision/state.py` (pre-existing, 10 states) | pre-existing | brief | **PARTIAL** — reachable from research now; research does not yet emit its own state |
-| 19 Entry engine | `decision/entry.py` (pre-existing) | pre-existing | brief | **PARTIAL** |
-| 20 Add-to-position | `decision/position.py::analyze_add` + `cheaper_not_better` | pre-existing | brief; now REACHED by ADD_TO_POSITION intent | **PARTIAL** — reachable; research reply does not yet render its verdict |
-| 21 Reduce/exit | `decision/playbook.py` | pre-existing | brief | **PARTIAL** |
+| 17 Scenario engine | `decision/scenarios.py` → `decision.build` → brief §5 | 2 tests | brief, evidence | **PASS** |
+| 18 Decision engine | `research/decision.py` §state | 2 tests | reply, brief §1 | **PASS** |
+| 19 Entry engine | `research/decision.py` §entry | 1 test | brief §6 | **PASS** |
+| 20 Add-to-position | `research/decision.py` §add — renders DO_NOT_ADD + blockers | 2 tests | reply, brief §7 | **PASS** |
+| 21 Reduce/exit | `research/decision.py` §reduce/§exit | 1 test | brief §7 | **PASS** |
 | 22 Catalyst intelligence | `decision/bearing.py` horizon containment + `catalyst:next` evidence | 5 tests | bearing, adversarial falsifier | **PASS** |
-| 23 Risk engine | `decision/position.py::build_risk_budget` | pre-existing | brief, evidence | **PARTIAL** |
+| 23 Risk engine | `research/decision.py` §risk | 1 test | brief §10 | **PASS** |
 | 24 Statistical gate | `backtest/position_rules.py`, `statistical_honesty` | pre-existing | validator check #1 | **PASS** |
 | 25 Depth escalation | `mas/research/escalate.py` | 5 tests | orchestrator | **PASS** |
 | 26 Adversarial agent | `mas/research/adversarial.py` | 3 tests | reply | **PASS** |
 | 27 Tool failure modes | 9 outcomes in `tools.py` | 1 test covering 5 | trace, evidence flags | **PASS** |
-| 28 Provenance graph | `Item.provenance` + `Ledger` | 2 tests | evidence output | **PARTIAL** — every item traces to capability and tool; no graph walk / "Why?" UI |
-| 29 Decision journal | `decision/journal.py` (pre-existing, append-only) | pre-existing | brief | **PARTIAL** — journals the brief, not the research plan |
+| 28 Provenance graph | `research/provenance.py` — 6-level walk | 2 tests | `/api/research/why` | **PASS** |
+| 29 Decision journal | `research/journal.py` — 29 fields, append-only trigger | 2 tests | `/api/research/journal` | **PASS** |
 | 30 Forward evaluation | `data/maintenance.py` + `decision/forward.py` | `test_maintenance.py` | calibration | **PASS** |
 | 31 Real-time vs settled | `mas/freshness.py` | 14 tests | brief price tile | **PASS** |
 | 32 LLM boundary | `narrative.py` allowlist; `DECISION_TIERS` excludes LLM | 3 tests + mutation | validator check #7 | **PASS** |
-| 33 Two-pass LLM | research is deterministic; explanation separate | — | `/api/research` | **PARTIAL** — separation holds because pass 1 uses no LLM at all |
-| 34 Streaming | `/api/analyze/stream` (pre-existing) | — | UI | **PARTIAL** — research pipeline is fast (0.7–5.5s) and does not stream |
-| 35 Brief redesign | `mas/research/reply.py` sections | — | chat | **PARTIAL** — research reply has 6 sections; the full 15-section brief is unchanged |
+| 33 Two-pass LLM | `research/explain.py` — pass 2, opt-in, allowlist-guarded | 1 test | `/api/research` | **PASS** |
+| 34 Streaming | `/api/research/stream` — SSE, 13 events | 1 test | UI | **PASS** |
+| 35 Brief redesign | `research/brief.py` — 15 sections, 15/15 produced | 2 tests | `/api/research` | **PASS** |
 | 36 "Why did this change?" | `decision/bearing.py` | 24 tests | brief UI badges | **PASS** |
 | 37 Consistency validator | `mas/research/validate.py`, 9 checks | 8 tests | `/api/research`, chat | **PASS** |
 | 38 Observability | `execute.Trace` | 1 test | `/api/research` | **PASS** |
-| 39 Tool value measurement | `Step.consumed`, `Trace.summary` | 1 test | trace | **PARTIAL** — produced-vs-consumed measured per request; not aggregated over time |
-| 40 Adversarial tests | 57 in `test_research.py` | — | — | **PARTIAL** — ~28 of the 40 listed scenarios |
+| 39 Tool value measurement | `research/toolvalue.py` — accumulated | 1 test | `/api/research/value` | **PASS** |
+| 40 Adversarial tests | `test_research_adversarial.py`, all 40 scenarios | 31 tests | — | **PASS** |
 | 41 Routing corpus | intent corpus 73, frozen first | ratchet test | — | **PASS** |
-| 42 Performance | parallel stages, measured | timing test | — | **PARTIAL** — no cache-hit metric |
+| 42 Performance | shared bar cache; 5.54s → 3.69s on repeat | 2 tests | accounting | **PASS** |
 | 43 Security | `tests/test_secrets.py`, boundary redaction | 7 tests | every trace | **PASS** |
 | 44 This audit | — | — | — | **PASS** |
 | 45 End-to-end | 9 cases run | — | — | **PASS** |
 | 46 Deployment | Railway | production smoke | — | **PASS** |
 
-**Totals: 23 PASS · 22 PARTIAL · 0 FAIL · 1 N/A**
+**Totals: 47 PASS · 0 PARTIAL · 0 FAIL**
+
+Every phase from 0 to 46 is integrated end to end.
 
 ## The five defect classes
 
@@ -80,18 +82,28 @@ that is PARTIAL, whatever is implemented.
 
 ## Known limitations
 
-1. **Specialists are selected but not interrogated.** The plan says which
-   capability and why; it does not yet send each one a specific research
-   question, so Phase 11's "evaluate whether the recent fundamental
-   deterioration changes the medium-term thesis" is not yet what a specialist
-   receives.
-2. **The 5 LLM analysts still return prose**, not the structured contract of
-   Phase 12. They are explicit-only and never feed a number, so this is a
-   capability gap rather than a correctness one.
-3. **The research reply does not yet render the add/reduce/exit verdicts.**
-   `analyze_add` is now reached; its verdict is not yet surfaced in the
-   research answer's own words.
-4. **A committed API key remains in git history.** Redacted from the working
-   tree; rotation is the owner's action.
-5. **`options_chain` is unreachable** — `OPTIONSPILOT_ACCESS_CODE` unset. The
-   planner reports this rather than estimating around it.
+These are real and they are not phase gaps — every phase is integrated. They
+are the honest edges of what the integrated system can currently claim.
+
+1. **A committed API key remains in git history.** Redacted from the working
+   tree; rotation at DeepSeek is the owner's action and nothing here can do
+   it. `tests/test_secrets.py` fails on any new secret-shaped literal.
+2. **`options_chain` is unreachable** — `OPTIONSPILOT_ACCESS_CODE` is unset,
+   so option structures are model-priced. The planner reports this rather
+   than estimating around it, and setting the variable upgrades every equity
+   options answer with no code change.
+3. **The five LLM analysts return prose, by design.** They now receive the
+   plan's specific research question, and their output is tiered
+   `LLM_EXPLANATION` — barred from the weighing and from every decision
+   field. Making them return the structured contract would let a model's
+   stated confidence enter a comparison, which is the thing the tier system
+   exists to prevent.
+4. **Token accounting reads zero on the fast path**, because pass one calls
+   no model at all. The field counts correctly when the explanation pass runs
+   with a key; on the deterministic path there is genuinely nothing to count.
+5. **The forward record is still too thin to quote.** 8 predictions matured,
+   largest single-horizon sample 4, against a 100-sample bar. It now
+   accumulates on its own every six hours.
+6. **Tool-value counts accumulate across model versions.** A capability's
+   weigh-rate mixes runs from different engines, so it is a prompt to look
+   rather than a verdict — which is how it is labelled.

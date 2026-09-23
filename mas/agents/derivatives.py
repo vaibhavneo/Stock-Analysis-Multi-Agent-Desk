@@ -161,8 +161,8 @@ def _bars(request: AgentRequest):
     closes = request.params.get("closes")
     if closes:
         return list(closes)
-    from financial_data import get_bars_df
-    df = get_bars_df(request.symbol, period=request.params.get("period", "1y"))
+    from ..research.budget import cached_bars
+    df = cached_bars(request.symbol, period=request.params.get("period", "1y"))
     return [float(v) for v in df["Close"].tolist()]
 
 

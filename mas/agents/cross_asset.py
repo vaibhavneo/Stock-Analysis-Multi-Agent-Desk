@@ -98,8 +98,10 @@ def _regress(y: List[float], x: List[float]) -> Dict[str, float]:
 
 
 def _closes_by_date(symbol: str, period: str) -> Dict[str, float]:
-    from financial_data import get_bars_df
-    df = get_bars_df(symbol, period=period)
+    # Shared cache: benchmark work and the research read pull the same
+    # series on most plans.
+    from ..research.budget import cached_bars
+    df = cached_bars(symbol, period=period)
     return {str(idx)[:10]: float(v) for idx, v in df["Close"].items()}
 
 

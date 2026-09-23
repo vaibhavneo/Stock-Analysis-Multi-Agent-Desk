@@ -270,9 +270,16 @@ BUILDERS = {
 
 
 def build(decision_obj: Optional[Dict[str, Any]],
-          intent: str) -> Dict[str, Any]:
-    """The decision sections THIS question asked for. Never raises."""
-    wanted = SECTIONS_FOR_INTENT.get(intent, SECTIONS_FOR_INTENT[GENERAL_RESEARCH])
+          intent: str, all_sections: bool = False) -> Dict[str, Any]:
+    """The decision sections THIS question asked for. Never raises.
+
+    `all_sections` is for the full brief, which is a document rather than an
+    answer: it carries every section that can be built regardless of what was
+    asked. The intent-scoped set stays the default, because returning an entry
+    plan on an exit question is the noise this table exists to remove.
+    """
+    wanted = (tuple(BUILDERS) if all_sections else
+              SECTIONS_FOR_INTENT.get(intent, SECTIONS_FOR_INTENT[GENERAL_RESEARCH]))
     if not decision_obj:
         return {"available": False, "intent": intent, "sections": [],
                 "asked_for": list(wanted),

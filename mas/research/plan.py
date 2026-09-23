@@ -354,14 +354,29 @@ def build_plan(question: str,
         candidates = T.tools_for(tk, asset_class=asset_class,
                                  available_only=True)
         if candidates:
-            best = candidates[0]
+            # Value per second of latency, not reliability alone. The old
+            # selector took the most reliable source regardless of what it
+            # cost to wait for, so a 2500ms chain outranked a 120ms model even
+            # for evidence the plan had marked optional.
+            from .budget import tool_value
+            scored = sorted(
+                ((c, tool_value(c.reliability, c.est_ms, necessity))
+                 for c in candidates), key=lambda cv: -cv[1])
+            best, value = scored[0]
+            runner_up = scored[1] if len(scored) > 1 else None
+            why = (f"best value for {tk.replace('_', ' ')}: reliability "
+                   f"{best.reliability:.2f} at {best.est_ms}ms "
+                   f"({value:.2f} per second of latency)")
+            if runner_up and runner_up[0].reliability > best.reliability:
+                why += (f"; {runner_up[0].id} is more reliable but "
+                        f"{runner_up[0].est_ms - best.est_ms}ms slower, which "
+                        f"does not pay for {necessity} evidence")
             plan.tools.append({
                 "evidence": tk, "tool": best.id, "necessity": necessity,
                 "freshness": best.freshness, "reliability": best.reliability,
-                "est_ms": best.est_ms,
-                "alternatives": [c.id for c in candidates[1:]],
-                "why": f"most reliable reachable source of "
-                       f"{tk.replace('_', ' ')}"})
+                "est_ms": best.est_ms, "value_per_sec": value,
+                "alternatives": [c.id for c, _ in scored[1:]],
+                "why": why})
             continue
         offline = T.tools_for(tk, asset_class=asset_class, available_only=False)
         reason = (offline[0].to_dict()["reason"] if offline

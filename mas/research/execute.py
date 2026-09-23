@@ -194,7 +194,9 @@ def _classify_result(value: Any) -> Dict[str, Any]:
 def run_stage(capabilities: List[Dict[str, Any]],
               runner: Callable[[str], Any],
               trace: Trace,
-              timeout_sec: float = 30.0) -> Dict[str, Step]:
+              timeout_sec: float = 30.0,
+              on_progress: Optional[Callable[[str, Dict[str, Any]], None]] = None
+              ) -> Dict[str, Step]:
     """One parallel stage. Independent capabilities are genuinely concurrent.
 
     Serialising independent work is the difference between a four-second
@@ -230,6 +232,11 @@ def run_stage(capabilities: List[Dict[str, Any]],
             step.data = cls.get("value")
         with lock:
             results[cap] = step
+        if on_progress:
+            on_progress("step", {"capability": cap, "outcome": step.outcome,
+                                 "elapsed_ms": step.elapsed_ms,
+                                 "records": step.records,
+                                 "reason": step.reason})
 
     for entry in capabilities:
         th = threading.Thread(target=_one, args=(entry,), daemon=True)
@@ -244,7 +251,9 @@ def run_stage(capabilities: List[Dict[str, Any]],
 
 
 def execute(plan, runner: Callable[[str], Any],
-            timeout_sec: float = 30.0) -> Dict[str, Any]:
+            timeout_sec: float = 30.0,
+            on_progress: Optional[Callable[[str, Dict[str, Any]], None]] = None
+            ) -> Dict[str, Any]:
     """Run every stage of a plan. Never raises."""
     trace = Trace(budget_ms=getattr(plan, "budget_ms", 6000))
     steps: Dict[str, Step] = {}
@@ -260,6 +269,7 @@ def execute(plan, runner: Callable[[str], Any],
         entries = [by_cap[c] for c in stage if c in by_cap]
         if not entries:
             continue
-        steps.update(run_stage(entries, runner, trace, timeout_sec))
+        steps.update(run_stage(entries, runner, trace, timeout_sec,
+                               on_progress=on_progress))
 
     return {"steps": steps, "trace": trace, "summary": trace.summary()}

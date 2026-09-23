@@ -129,8 +129,8 @@ class Backtester:
                 Backtester.AGENT_ID, request.capability,
                 "a backtest needs a symbol to run on")
         try:
-            from financial_data import get_bars_df
-            df = get_bars_df(symbol, period=request.params.get("period", "5y"))
+            from ..research.budget import cached_bars
+            df = cached_bars(symbol, period=request.params.get("period", "5y"))
         except Exception as e:
             return unavailable(Backtester.AGENT_ID, request.capability,
                                f"no price history for {symbol} "
