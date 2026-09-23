@@ -306,7 +306,11 @@ def build(decision_obj: Optional[Dict[str, Any]],
         "sections": sections,
         "n_produced": len(produced),
         "statement": (
+            f"All {len(sections)} decision sections this question asks for "
+            f"were produced."
+            if len(produced) == len(sections) else
             f"{len(produced)} of {len(sections)} decision sections this "
-            f"question asks for were produced. The others are named rather "
-            f"than filled in."),
+            f"question asks for were produced; the other "
+            f"{len(sections) - len(produced)} are named rather than filled "
+            f"in."),
     }
