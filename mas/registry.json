@@ -269,12 +269,12 @@
       "price_basis": null,
       "priority": 90,
       "reliability": 0.5,
-      "timeout_sec": 420,
+      "timeout_sec": 75,
       "requires_key": "DEEPSEEK_API_KEY",
       "est_ms": 120000,
       "symbol_required": true,
       "writes": {},
-      "notes": "PROSE ONLY, and never implied. No number in any decision field comes from these agents \u2014 the verdict, levels and sizing are deterministic and identical whether or not this ran. Priority 90 and est_ms 120000 keep it out of every budgeted path; it runs when a user asks for the written reasoning and not otherwise."
+      "notes": "PROSE ONLY, and never implied. No number in any decision field comes from these agents \u2014 the verdict, levels and sizing are deterministic and identical whether or not this ran. Priority 90 and est_ms 120000 keep it out of every budgeted path; it runs when a user asks for the written reasoning and not otherwise. Bounded at 75s NOT because the pass finishes in 75s \u2014 it does not, it takes minutes \u2014 but because an interactive turn must not hang on it. When the bound trips, the decline points at /api/analyze/stream, which runs the same five agents with progress instead of a blank wait."
     },
     "intelligence": {
       "id": "intelligence",

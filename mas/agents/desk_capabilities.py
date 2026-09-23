@@ -222,6 +222,16 @@ class Research:
 # ══════════════════════════════════════════════════════════════════════════
 # The five LLM analysts — the sub-agents the product is named for
 # ══════════════════════════════════════════════════════════════════════════
+# Where to send someone when the interactive bound trips. The same five
+# agents run there with per-agent progress, which is the difference between
+# waiting and watching.
+ANALYST_STREAMING_ROUTE = (
+    "This pass runs five LLM agents and takes minutes, which is longer than "
+    "an interactive turn should hold. Run it from Analyze Stock — the same "
+    "five agents, streamed with progress, instead of a blank wait. Every "
+    "number in the brief is already computed without them.")
+
+
 class Analysts:
     """Fundamentals, Technical, Social, Algo and Prediction, as one capability.
 

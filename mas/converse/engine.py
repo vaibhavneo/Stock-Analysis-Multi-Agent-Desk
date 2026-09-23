@@ -132,7 +132,16 @@ def turn(text: str, session_id: Optional[str] = None,
             sym = "" if cap in GLOBAL_CAPS and not subject else (subject or "")
             if cap == "strategy_backtest":
                 sym = subject or ""
-            results[cap] = _run_capability(cap, sym, params)
+            step = _run_capability(cap, sym, params)
+            # A bounded-out analyst pass is not a failure, it is a job too long
+            # for this surface. Say where it does run rather than reporting a
+            # timeout the user can do nothing with.
+            if (cap == "analyst_narrative"
+                    and not (step.get("result") or {}).get("status") == "OK"
+                    and "within" in (step.get("unanswered_reason") or "")):
+                from ..agents.desk_capabilities import ANALYST_STREAMING_ROUTE
+                step["unanswered_reason"] = ANALYST_STREAMING_ROUTE
+            results[cap] = step
 
     answer = reply_mod.compose(parsed, results, subject)
     session_mod.record(sess, text, parsed, answer)

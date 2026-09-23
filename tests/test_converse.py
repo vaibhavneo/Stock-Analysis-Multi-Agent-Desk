@@ -374,6 +374,38 @@ def test_the_written_reasoning_is_never_confused_with_the_interpretive_layer():
           == ["market_intelligence"])
 
 
+def test_a_bounded_analyst_pass_points_somewhere_useful():
+    """The five-agent pass takes minutes — longer than an interactive turn
+    should hold. In production it ran past the client's patience and returned
+    nothing a user could act on. The bound now trips and names the streaming
+    route that runs the same agents with progress."""
+    import mas.converse.engine as eng
+    from mas.agents.desk_capabilities import ANALYST_STREAMING_ROUTE
+    from mas import registry
+
+    spec = registry.get("analysts")
+    check("bounded well under a minute and a half",
+          spec["timeout_sec"] <= 90, spec["timeout_sec"])
+    check("the pointer names the streaming route",
+          "Analyze Stock" in ANALYST_STREAMING_ROUTE, ANALYST_STREAMING_ROUTE)
+    check("and says the numbers do not depend on it",
+          "already computed without them" in ANALYST_STREAMING_ROUTE)
+
+    orig = eng._run_capability
+    eng._run_capability = lambda cap, sym, params: {
+        "capability": cap, "result": None,
+        "unanswered_reason": "no answer within 75s"}
+    try:
+        out = eng.turn("explain your reasoning on NVDA")
+        text = " ".join(l for b in out["reply"]["blocks"] for l in b["lines"])
+        check("the timeout is replaced by the pointer",
+              "Analyze Stock" in text, text[:200])
+        check("and the raw timeout is not what the user sees",
+              "within 75s" not in text, text[:200])
+    finally:
+        eng._run_capability = orig
+
+
 if __name__ == "__main__":
     import traceback
     for name, fn in sorted(list(globals().items())):
